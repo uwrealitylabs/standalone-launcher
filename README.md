@@ -5,6 +5,7 @@ Once Standalone gets to a stage where it supports running OpenXR applications, t
 The solution is this: A *custom launcher*. We develop our own OpenXR-based application that exposes a *launcher* environment to the user. In this launcher environment, the user can ideally browse installed OpenXR applications, browse the internet to download more, or launch WebXR experiences on the internet. In addition, we would want to expose basic OS functionalities, e.g. a shell interface, file browsing, windows, etc.
 
 An example of an existing launcher environment —that we will likely end up copying a lot from —is Meta Horizon OS, illustrated below:
-![image.png](attachment:d0f59130-393b-4c0e-86aa-4372e5aae22d:image.png)
+<img width="1024" height="576" alt="image" src="https://github.com/user-attachments/assets/2e5f28bf-83a0-473f-a164-9af4193a1501" />
+
 
 More details can be found on this project's [Notion page](https://uwrl.notion.site/Custom-Launcher-23cbc072402f8060a9e2de823c607f72?source=copy_link)
