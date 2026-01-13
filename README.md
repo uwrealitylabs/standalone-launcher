@@ -29,8 +29,14 @@ You're now ready to open the project! First, open Godot if it's not already open
 <img width="1150" height="835" alt="image" src="https://github.com/user-attachments/assets/c2b76c2c-bb4d-42b3-8907-b2212d27604a" />
 
 From here, click on "Import", and then navigate to and select the folder where you cloned the Standalone Launcher repository. In the example below, the repo was cloned to `C:/Users/ntabl/dev/GodotProjects/standalone-launcher`
+
+1)
 <img width="125" height="56" alt="image" src="https://github.com/user-attachments/assets/532af4f7-cbc5-4377-818f-d75ceec3817f" />
+
+2)
 <img width="519" height="371" alt="image" src="https://github.com/user-attachments/assets/f39cacc6-079c-4c2a-86ad-8cf3ffcb6d62" />
+
+3)
 <img width="246" height="141" alt="image" src="https://github.com/user-attachments/assets/046d9d12-b72d-4740-8845-af58fed7c1ea" />
 
 If successful, the project should open once you click "Import" on the final screen, and you should now be able to see an editor window open in the project. Something like this:
