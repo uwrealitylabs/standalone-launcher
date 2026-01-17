@@ -29,6 +29,10 @@ version_control/autoload_on_startup=true
 
 enabled=PackedStringArray("res://addons/godot-xr-tools/plugin.cfg")
 
+[rendering]
+
+renderer/rendering_method="mobile"
+
 [xr]
 
 openxr/enabled=true
