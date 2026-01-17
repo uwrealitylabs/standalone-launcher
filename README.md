@@ -2,58 +2,46 @@
 
 Once Standalone gets to a stage where it supports running OpenXR applications, the final aspect of the project will be some sort of **user interface**. That is, how will users of our headset be able to select and launch OpenXR (or WebXR) applications without needing to link it with an external device?
 
-The solution is this: A *custom launcher*. We develop our own OpenXR-based application that exposes a *launcher* environment to the user. In this launcher environment, the user can ideally browse installed OpenXR applications, browse the internet to download more, or launch WebXR experiences on the internet.
+The solution is this: A *custom launcher*. We develop our own OpenXR-based application that exposes a *launcher* environment to the user. In this launcher environment, the user can ideally browse installed OpenXR applications, browse the internet to download more, or launch WebXR experiences on the internet. In addition, we would want to expose basic OS functionalities, e.g. a shell interface, file browsing, windows, etc.
 
-In addition, we would want to expose basic OS functionalities, e.g. a shell interface, file browsing, windows, etc.
+An example of an existing launcher environment —that we will likely end up copying a lot from —is Meta Horizon OS, illustrated below:
+<img width="1024" height="576" alt="image" src="https://github.com/user-attachments/assets/2e5f28bf-83a0-473f-a164-9af4193a1501" />
+_Meta Horizon OS ([Source](https://www.uploadvr.com/meta-teases-the-future-of-horizon-os/))_
 
-## Implementation
+More details can be found on this project's [Notion page](https://uwrl.notion.site/Custom-Launcher-23cbc072402f8060a9e2de823c607f72?source=copy_link)
 
-To develop this application, there are a few options. Note that the Raspberry CM5’s processor uses ARM architecture, and thus any game engine or development platform we use must support compiling applications to Linux on ARM. Unfortunately, Unity does not compile to ARM Linux, but we do have other available options:
+# Contribution Setup
+This is a **Godot** project, so setting up will involve first downloading Godot, and then opening this project in Godot.
 
-- Unreal Engine 5
-- Godot
-- Graphics API only (e.g. OpenGL/Vulkan)
+## Godot Installation
+<img width="480" height="270" alt="image" src="https://github.com/user-attachments/assets/115d865a-b0f8-49ac-804c-98c0f366faed" />
 
-With the presence of Godot, UE5 becomes overkill, so the choice is really just between Godot and no engine at all.
+This project uses Godot _v4.5_, which can be downloaded [here](https://godotengine.org/download/archive/#:~:text=4.5%2Dstable,15%20September%202025).
+After the .zip file is downloaded, you can follow the rest [this video](https://youtu.be/WsRgIVg0nGM?t=46) for the remaining setup. This will likely take you less than two minutes.
 
-Although creating the launcher using something like OpenGL would be a fun technical challenge, the most practical option is undoubtedly Godot, as this will allow quick prototyping and iteration. Thus, assuming no compatibility issues down the road, **Godot** is what we will use to create this launcher.
+## Cloning (Downloading) the Project
+Now that you Godot is installed, you'll want to download the Standalone Launcher projeect onto your computer. To do this, you're going to clone this github repository. This will download the current state of the project onto your computer, in addition to allowing you to make local changes, and then later push those changes back into the project. 
 
-## Plan
+To clone the repository, follow [this tutorial](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository). Ensure to remember where (i.e. the path to the folder) you clone the repository to within your file system.
 
-The current plan is as follows:
+## Importing the Project
+You're now ready to open the project! First, open Godot if it's not already open, and you should see a screen similar to what is shown below:
 
-1. ~~Validate a Godot application on a Pi5 [DONE]~~
-    1. Develop a simple Godot application, e.g. with a command line that can execute shell commands (this will be useful later for launching applications)
-    2. Compile it and attempt to run it on a Raspberry Pi 5
-2. ~~Test OpenXR functionality~~
-    1. Install Monado on a Raspberry Pi 5
-    2. Add some kind of XR feature to do the Godot application for testing purposes
-    3. Emulate an OpenXR device with Monado https://redstrate.com/blog/2023/11/using-openxr-without-real-hardware/
-    4. Test XR features, e.g. HMD tracking or controllers, on the Godot application
-3. [CURRENT] Add basic OS functionality
-    1. Add a 3D keyboard that can be interacted with in XR
-    2. Add a bash shell interface
-    3. Any other OS features that could be easily added in
-5. Add functionality for querying launching applications
-    1. Develop functionality within the launcher (in Godot) that allows a user to launch some arbitrary application.
-    2. Make it so that users interacting with the launcher can query existing XR applications on the Pi5, and choose which one to launch. Potentially use a file system W shortcuts here.
-    3. Test it
-6. Make it so that the launcher runs on start-up as an OS wrapper
-7. Add additional OS features, e.g. windows, browsing, desktop
-8. Add embedded browser functionality for downloading applications
-9. Make it so that downloaded applications can be automatically added to the UI and launched by the user
-10. Add WebXR launching functionality from the embedded browser (potentially into a separate actual chromium process)
-    1. Figure out how to get WebXR to work on linux with chromium
-11. Test with our actual XR hardware
-    1. Assuming Monado works fully with our hardware, test out our launcher
-    2. Once this step is complete, then our MVP for Standalone is done! We have a standalone headset that a user can use to download & launch XR applications!
-12. Testing & Polish
-    1. Improve UI/UX
+<img width="1150" height="835" alt="image" src="https://github.com/user-attachments/assets/c2b76c2c-bb4d-42b3-8907-b2212d27604a" />
 
-## Resources
+From here, click on "Import", and then navigate to and select the folder where you cloned the Standalone Launcher repository. In the example below, the repo was cloned to `C:/Users/ntabl/dev/GodotProjects/standalone-launcher`
 
-[OpenXR with no hardware with Monado](https://redstrate.com/blog/2023/11/using-openxr-without-real-hardware/)
+1)
+<img width="125" height="56" alt="image" src="https://github.com/user-attachments/assets/532af4f7-cbc5-4377-818f-d75ceec3817f" />
 
-[Chromium embedded in Godot 4](https://github.com/Lecrapouille/gdcef)
+2)
+<img width="519" height="371" alt="image" src="https://github.com/user-attachments/assets/f39cacc6-079c-4c2a-86ad-8cf3ffcb6d62" />
 
-[WebXR on Linux](https://github.com/mrxz/webxr-linux)
+3)
+<img width="246" height="141" alt="image" src="https://github.com/user-attachments/assets/046d9d12-b72d-4740-8845-af58fed7c1ea" />
+
+If successful, the project should open once you click "Import" on the final screen, and you should now be able to see an editor window open in the project. Something like this:
+
+<img width="2546" height="1514" alt="image" src="https://github.com/user-attachments/assets/253cc84a-1b6f-47c2-9d04-aac6ad93ea53" />
+
+With that, you're all set to contribute. Get to building!
