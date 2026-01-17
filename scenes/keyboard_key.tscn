@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://b6g5i1wbya140"]
+
+[node name="KeyboardKey" type="Button"]
+custom_minimum_size = Vector2(30, 0)
+offset_right = 8.0
+offset_bottom = 8.0
+text = "Q"
