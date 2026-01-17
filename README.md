@@ -6,6 +6,7 @@ The solution is this: A *custom launcher*. We develop our own OpenXR-based appli
 
 An example of an existing launcher environment —that we will likely end up copying a lot from —is Meta Horizon OS, illustrated below:
 <img width="1024" height="576" alt="image" src="https://github.com/user-attachments/assets/2e5f28bf-83a0-473f-a164-9af4193a1501" />
+_Meta Horizon OS ([Source](https://www.uploadvr.com/meta-teases-the-future-of-horizon-os/))_
 
 More details can be found on this project's [Notion page](https://uwrl.notion.site/Custom-Launcher-23cbc072402f8060a9e2de823c607f72?source=copy_link)
 
