@@ -9,7 +9,6 @@ func _ready():
 
 		# Turn off v-sync!
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
-		DisplayServer.virtual_keyboard_show("")
 
 		# Change our main viewport to output to the HMD
 		get_viewport().use_xr = true

@@ -1,7 +1,9 @@
 [gd_scene load_steps=11 format=3 uid="uid://005yynllri51"]
 
 [ext_resource type="Script" uid="uid://bkrl5lcnvl3lj" path="res://main.gd" id="1_ig7tw"]
+[ext_resource type="PackedScene" uid="uid://clujaf3u776a3" path="res://addons/godot-xr-tools/objects/viewport_2d_in_3d.tscn" id="2_1bvp3"]
 [ext_resource type="PackedScene" uid="uid://cs5ym0gwlvop" path="res://xr_player.tscn" id="2_ig7tw"]
+[ext_resource type="Script" uid="uid://phmvrwkudp7u" path="res://addons/godot-xr-tools/objects/keyboard/virtual_keyboard_2d.gd" id="3_lquwl"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_0xm2m"]
 sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
@@ -28,6 +30,14 @@ size = Vector3(10, 0.1, 10)
 [node name="Node3D" type="Node3D"]
 script = ExtResource("1_ig7tw")
 
+[node name="Viewport2Din3D" parent="." instance=ExtResource("2_1bvp3")]
+transparent = 1
+scene_properties_keys = PackedStringArray()
+
+[node name="XRToolsVirtualKeyboard2D" type="CanvasLayer" parent="Viewport2Din3D"]
+script = ExtResource("3_lquwl")
+metadata/_custom_type_script = "uid://phmvrwkudp7u"
+
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_1bvp3")
 
@@ -38,6 +48,7 @@ shadow_enabled = true
 [node name="XRPlayer" parent="." instance=ExtResource("2_ig7tw")]
 
 [node name="Ground" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
 shape = SubResource("BoxShape3D_0xm2m")
