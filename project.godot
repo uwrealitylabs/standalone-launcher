@@ -13,9 +13,15 @@ config_version=5
 config/name="standalone-launcher"
 run/main_scene="uid://005yynllri51"
 config/features=PackedStringArray("4.5", "Forward Plus")
-config/icon="res://icon.svg"
+config/icon="res://sprites/icon.svg"
+
+[editor]
+
+version_control/plugin_name="GitPlugin"
+version_control/autoload_on_startup=true
 
 [xr]
 
 openxr/enabled=true
+openxr/default_action_map="res://rsc/openxr_action_map.tres"
 shaders/enabled=true

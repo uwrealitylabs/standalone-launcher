@@ -1,0 +1,215 @@
+[gd_scene load_steps=2 format=3 uid="uid://do0jprft2sj7b"]
+
+[ext_resource type="PackedScene" uid="uid://b6g5i1wbya140" path="res://scenes/keyboard_key.tscn" id="1_7hgym"]
+
+[node name="KeyboardUI" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+alignment = 1
+
+[node name="Numbers" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="1" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "1"
+
+[node name="2" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "2"
+
+[node name="3" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "3"
+
+[node name="4" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "4"
+
+[node name="5" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "5"
+
+[node name="6" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "6"
+
+[node name="7" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "7"
+
+[node name="8" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "8"
+
+[node name="9" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "9"
+
+[node name="10" parent="VBoxContainer/Numbers" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "10
+"
+
+[node name="Row1" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="Q" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+
+[node name="W" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "W"
+
+[node name="E" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "E"
+
+[node name="R" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "R"
+
+[node name="T" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "T"
+
+[node name="Y" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "Y"
+
+[node name="U" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "U"
+
+[node name="I" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "I"
+
+[node name="O" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "O"
+
+[node name="P" parent="VBoxContainer/Row1" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "P"
+
+[node name="Row2" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="A" parent="VBoxContainer/Row2" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "A"
+
+[node name="S" parent="VBoxContainer/Row2" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "S
+"
+
+[node name="D" parent="VBoxContainer/Row2" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "D"
+
+[node name="F" parent="VBoxContainer/Row2" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "F"
+
+[node name="G" parent="VBoxContainer/Row2" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "G"
+
+[node name="H" parent="VBoxContainer/Row2" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "H"
+
+[node name="J" parent="VBoxContainer/Row2" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "J"
+
+[node name="K" parent="VBoxContainer/Row2" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "K"
+
+[node name="L" parent="VBoxContainer/Row2" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "L
+"
+
+[node name="Row3" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="SHIFT" parent="VBoxContainer/Row3" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "SHIFT
+"
+
+[node name="Z" parent="VBoxContainer/Row3" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "Z"
+
+[node name="X" parent="VBoxContainer/Row3" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "X"
+
+[node name="C" parent="VBoxContainer/Row3" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "C"
+
+[node name="V" parent="VBoxContainer/Row3" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "V"
+
+[node name="B" parent="VBoxContainer/Row3" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "B"
+
+[node name="N" parent="VBoxContainer/Row3" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "N"
+
+[node name="M" parent="VBoxContainer/Row3" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "M"
+
+[node name="BACK" parent="VBoxContainer/Row3" instance=ExtResource("1_7hgym")]
+layout_mode = 2
+text = "BACK"
+
+[node name="Row4" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="CAPS" parent="VBoxContainer/Row4" instance=ExtResource("1_7hgym")]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "CAPS
+"
+
+[node name="SPACE" parent="VBoxContainer/Row4" instance=ExtResource("1_7hgym")]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "SPACE
+"
+
+[node name="ENTER" parent="VBoxContainer/Row4" instance=ExtResource("1_7hgym")]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "ENTER
+"

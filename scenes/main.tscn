@@ -1,0 +1,25 @@
+[gd_scene load_steps=5 format=3 uid="uid://005yynllri51"]
+
+[ext_resource type="Script" uid="uid://bkrl5lcnvl3lj" path="res://scipts/main.gd" id="1_o5qli"]
+[ext_resource type="PackedScene" uid="uid://ddlt12g8v3qvg" path="res://scenes/keyboard.tscn" id="2_0wfyh"]
+
+[sub_resource type="Sky" id="Sky_0wfyh"]
+
+[sub_resource type="Environment" id="Environment_sugp2"]
+background_mode = 1
+background_color = Color(0.6313726, 0.96862745, 1, 1)
+sky = SubResource("Sky_0wfyh")
+
+[node name="Node3D" type="Node3D"]
+script = ExtResource("1_o5qli")
+
+[node name="XROrigin3D" type="XROrigin3D" parent="."]
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D"]
+transform = Transform3D(1, 0, 0, 0, 0.7606213, 0.64919585, 0, -0.64919585, 0.7606213, 0, 1.7664756, -0.31055608)
+
+[node name="Keyboard" parent="." instance=ExtResource("2_0wfyh")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.4134891, 0.15590286, -2.6450562)
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_sugp2")

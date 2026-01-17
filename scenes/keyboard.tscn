@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3 uid="uid://ddlt12g8v3qvg"]
+
+[ext_resource type="PackedScene" uid="uid://do0jprft2sj7b" path="res://scenes/keyboard_ui.tscn" id="1_attx4"]
+
+[sub_resource type="ViewportTexture" id="ViewportTexture_gnjq6"]
+viewport_path = NodePath("Sprite3D/SubViewport")
+
+[node name="Keyboard" type="Node3D"]
+
+[node name="Sprite3D" type="Sprite3D" parent="."]
+texture = SubResource("ViewportTexture_gnjq6")
+
+[node name="SubViewport" type="SubViewport" parent="Sprite3D"]
+size = Vector2i(357, 187)
+
+[node name="KeyboardUI" parent="Sprite3D/SubViewport" instance=ExtResource("1_attx4")]
