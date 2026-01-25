@@ -1,0 +1,33 @@
+[gd_scene load_steps=3 format=3 uid="uid://bmfbm0tifmix4"]
+
+[ext_resource type="Script" uid="uid://cpyjrjivrr8gj" path="res://LaunchService_keypress.gd" id="1_u3ugm"]
+[ext_resource type="Script" uid="uid://r2ocxm2lrvwv" path="res://LaunchService_buttonpress.gd" id="2_43eqn"]
+
+[node name="Control" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Button" type="Button" parent="."]
+layout_mode = 0
+offset_left = 507.0
+offset_top = 253.0
+offset_right = 648.0
+offset_bottom = 288.0
+text = "Launch App
+"
+script = ExtResource("2_43eqn")
+
+[node name="Label" type="Label" parent="."]
+layout_mode = 0
+offset_left = 402.0
+offset_top = 192.0
+offset_right = 753.0
+offset_bottom = 218.0
+text = "Click O to launch test app or click the button"
+script = ExtResource("1_u3ugm")
+
+[connection signal="pressed" from="Button" to="Button" method="_on_pressed"]
