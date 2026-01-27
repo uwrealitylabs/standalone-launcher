@@ -14,6 +14,18 @@ func parse_desktop_file(file_path: String) -> Dictionary:
 		elif line.contains("="):
 			var parts = line.split("=", 2)
 			var key = parts[0].strip_edges()
+			if key == "Terminal":
+				var value = parts[1].strip_edges()
+				if value == "false":
+					continue
+				else:
+					return {}
+			if key == "NoDisplay":
+				var value = parts[1].strip_edges()
+				if value == "false":
+					continue
+				else:
+					return {}
 			if key == "Exec" or key == "Icon" or key == "Categories":
 				var value = parts[1].strip_edges()
 				if current_section:
