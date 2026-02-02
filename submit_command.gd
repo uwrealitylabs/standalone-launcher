@@ -8,7 +8,7 @@ func _on_pressed() -> void:
 	match OS.get_name():
 		"Windows":
 			OS.execute("CMD.exe", ["/C", input], output, true)
-		"Linux", "X11":
+		"macOS", "Linux", "X11":
 			var split_input: PackedStringArray = input.split(" ") 
 			var path: String = split_input[0]
 			var args: PackedStringArray = PackedStringArray(Array(split_input).slice(1))
