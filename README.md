@@ -47,7 +47,7 @@ If successful, the project should open once you click "Import" on the final scre
 With that, you're all set to contribute. Get to building!
 
 # Contribution Guidelines (Read me!)
-Now that you're all set to contribute, it'll be worth familiarizing yourself with our agreed-upon guidelines.
+To keep the project organized and improve efficiency, it's recommended that you familiarize yourself with the contribution guidelines below.
 
 ## Project Organization
 For project organization, we generally follow the guidelines provided by the [Godot Docs](https://docs.godotengine.org/en/stable/tutorials/best_practices/project_organization.html). It's recommended that you give this a quick read.
