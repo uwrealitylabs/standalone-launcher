@@ -13,7 +13,7 @@ config_version=5
 config/name="standalone-launcher"
 run/main_scene="uid://005yynllri51"
 config/features=PackedStringArray("4.5", "Forward Plus")
-config/icon="res://icon.svg"
+config/icon="res://sprites/icon.svg"
 
 [autoload]
 
@@ -31,4 +31,5 @@ renderer/rendering_method="mobile"
 [xr]
 
 openxr/enabled=true
+openxr/default_action_map="res://project/xr/openxr_action_map.tres"
 shaders/enabled=true
