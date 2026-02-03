@@ -61,6 +61,6 @@ For programming in GDScript, we also follow the style guide provided by the [God
 Some important guidelines:
 - Follow [these naming conventions](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html#naming-conventions).
 - Use **Tabs** for indentation (editor default)
-- Surround function and class definitions with **two** blank lines. For example:
+- Surround function and class definitions with **two** blank lines.
 - Keep lines of code **under 100 characters**
 - [Format multiline statements for readability](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html#format-multiline-statements-for-readability)
