@@ -45,3 +45,22 @@ If successful, the project should open once you click "Import" on the final scre
 <img width="2546" height="1514" alt="image" src="https://github.com/user-attachments/assets/253cc84a-1b6f-47c2-9d04-aac6ad93ea53" />
 
 With that, you're all set to contribute. Get to building!
+
+# Contribution Guidelines (Read me!)
+Now that you're all set to contribute, it'll be worth familiarizing yourself with our agreed-upon guidelines.
+
+## Project Organization
+For project organization, we generally follow the guidelines provided by the [Godot Docs](https://docs.godotengine.org/en/stable/tutorials/best_practices/project_organization.html). It's recommended that you give this a quick read.
+Some important ones:
+- Use **snake_case** for folder and file names.
+- Use **PascalCase** for node names.
+- In general, keep third-party resources in the top-level `addons/` folder, even if they aren't editor plugins.
+
+## GDScript Style Guide
+For programming in GDScript, we also follow the style guide provided by the [Godot Docs]. It's recommended that you also give this a quick read.
+Some important guidelines:
+- Follow [these naming conventions](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html#naming-conventions).
+- Use **Tabs** for indentation (editor default)
+- Surround function and class definitions with **two** blank lines. For example:
+- Keep lines of code **under 100 characters**
+- [Format multiline statements for readability](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html#format-multiline-statements-for-readability)
