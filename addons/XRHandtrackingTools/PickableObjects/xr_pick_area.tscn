@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3 uid="uid://cqkiyb020plc3"]
+
+[ext_resource type="Script" uid="uid://b6von87up3h0n" path="res://addons/XRHandtrackingTools/PickableObjects/xr_pick_area.gd" id="1_5g62l"]
+
+[node name="PickArea" type="Area3D"]
+collision_layer = 262148
+collision_mask = 0
+monitoring = false
+script = ExtResource("1_5g62l")
+
+[connection signal="property_list_changed" from="." to="." method="_on_property_list_changed"]
