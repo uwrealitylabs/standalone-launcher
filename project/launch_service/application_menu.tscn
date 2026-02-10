@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://b8fivfuswf2nv"]
+[gd_scene load_steps=2 format=3 uid="uid://bj2nrttrnlput"]
 
 [ext_resource type="Script" uid="uid://dg53620vpv8q6" path="res://project/launch_service/app_registry.gd" id="1_s5bno"]
 
