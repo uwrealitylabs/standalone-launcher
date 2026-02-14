@@ -57,7 +57,7 @@ Some important ones:
 - In general, keep third-party resources in the top-level `addons/` folder, even if they aren't editor plugins.
 
 ## GDScript Style Guide
-For programming in GDScript, we also follow the style guide provided by the [Godot Docs]. It's recommended that you also give this a quick read.
+For programming in GDScript, we also follow the style guide provided by the [Godot Docs](https://docs.godotengine.org/en/4.4/tutorials/scripting/gdscript/gdscript_styleguide.html). It's recommended that you also give this a quick read.
 Some important guidelines:
 - Follow [these naming conventions](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html#naming-conventions).
 - Use **Tabs** for indentation (editor default)
