@@ -1,0 +1,17 @@
+[gd_scene load_steps=3 format=3 uid="uid://pjen65ktutsy"]
+
+[ext_resource type="PackedScene" uid="uid://clujaf3u776a3" path="res://addons/godot-xr-tools/objects/viewport_2d_in_3d.tscn" id="1_scxe3"]
+[ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="2_nho3t"]
+
+[node name="commandLine" type="Node3D"]
+
+[node name="Viewport2Din3D" parent="." instance=ExtResource("1_scxe3")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.344, 0)
+screen_size = Vector2(1, 0.6)
+viewport_size = Vector2(800, 600)
+transparent = 1
+scene_properties_keys = PackedStringArray()
+
+[node name="VirtualKeyboard" parent="." instance=ExtResource("2_nho3t")]
+transform = Transform3D(0.6, 0, 0, 0, 0.50603485, 0.3223798, 0, -0.3223798, 0.50603485, 0, 0, 0)
+scene_properties_keys = PackedStringArray("virtual_keyboard_2d.gd")

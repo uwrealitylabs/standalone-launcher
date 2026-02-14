@@ -1,0 +1,25 @@
+[gd_scene load_steps=3 format=3 uid="uid://b3rhymncbdh4c"]
+
+[ext_resource type="Script" uid="uid://btst3tuhwwg8m" path="res://addons/XRHandtrackingTools/TrackedHands/hand_pose_matcher.gd" id="1_gxfge"]
+[ext_resource type="Resource" uid="uid://csy7fd4i3c7qw" path="res://addons/XRHandtrackingTools/PoseRecordingRoom/pose_records.tres" id="2_xta62"]
+
+[node name="HandPoseMatcher" type="Node"]
+script = ExtResource("1_gxfge")
+pose_catalogue = ExtResource("2_xta62")
+poses_to_recognize = {
+"Cup": true,
+"Fist": true,
+"Five": true,
+"Four": true,
+"Grip": true,
+"Horns": true,
+"Metal": true,
+"OK": true,
+"One": true,
+"Phone": true,
+"Pistol": true,
+"Rest": true,
+"Three": true,
+"Thumb": true,
+"Two": true
+}

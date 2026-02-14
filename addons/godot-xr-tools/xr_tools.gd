@@ -330,7 +330,7 @@ static func get_palm_offset(mode : HandOffsetMode, xr_controller : XRController3
 		if xr_controller.tracker != "left_hand":
 			is_left_hand = false
 
-		var xr_tracker : XRControllerTracker = XRServer.get_tracker(xr_controller.tracker)
+		var xr_tracker : XRPositionalTracker = XRServer.get_tracker(xr_controller.tracker)
 		if xr_tracker:
 			profile = xr_tracker.profile
 
