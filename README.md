@@ -10,6 +10,25 @@ _Meta Horizon OS ([Source](https://www.uploadvr.com/meta-teases-the-future-of-ho
 
 More details can be found on this project's [Notion page](https://uwrl.notion.site/Custom-Launcher-23cbc072402f8060a9e2de823c607f72?source=copy_link)
 
+# Contribution Guidelines (Read me!)
+To keep the project organized and improve efficiency, it's recommended that you familiarize yourself with the contribution guidelines below.
+
+## Project Organization
+For project organization, we generally follow the guidelines provided by the [Godot Docs](https://docs.godotengine.org/en/stable/tutorials/best_practices/project_organization.html). It's recommended that you give this a quick read.
+Some important ones:
+- Use **snake_case** for folder and file names.
+- Use **PascalCase** for node names.
+- In general, keep third-party resources in the top-level `addons/` folder, even if they aren't editor plugins.
+
+## GDScript Style Guide
+For programming in GDScript, we also follow the style guide provided by the [Godot Docs](https://docs.godotengine.org/en/4.4/tutorials/scripting/gdscript/gdscript_styleguide.html). It's recommended that you also give this a quick read.
+Some important guidelines:
+- Follow [these naming conventions](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html#naming-conventions).
+- Use **Tabs** for indentation (editor default)
+- Surround function and class definitions with **two** blank lines.
+- Keep lines of code **under 100 characters**
+- [Format multiline statements for readability](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html#format-multiline-statements-for-readability)
+
 # Contribution Setup
 This is a **Godot** project, so setting up will involve first downloading Godot, and then opening this project in Godot.
 
@@ -20,7 +39,7 @@ This project uses Godot _v4.5_, which can be downloaded [here](https://godotengi
 After the .zip file is downloaded, you can follow the rest [this video](https://youtu.be/WsRgIVg0nGM?t=46) for the remaining setup. This will likely take you less than two minutes.
 
 ## Cloning (Downloading) the Project
-Now that you Godot is installed, you'll want to download the Standalone Launcher projeect onto your computer. To do this, you're going to clone this github repository. This will download the current state of the project onto your computer, in addition to allowing you to make local changes, and then later push those changes back into the project. 
+Now that Godot is installed, you'll want to download the Standalone Launcher projeect onto your computer. To do this, you're going to clone this github repository. This will download the current state of the project onto your computer, in addition to allowing you to make local changes, and then later push those changes back into the project. 
 
 To clone the repository, follow [this tutorial](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository). Ensure to remember where (i.e. the path to the folder) you clone the repository to within your file system.
 
@@ -45,22 +64,3 @@ If successful, the project should open once you click "Import" on the final scre
 <img width="2546" height="1514" alt="image" src="https://github.com/user-attachments/assets/253cc84a-1b6f-47c2-9d04-aac6ad93ea53" />
 
 With that, you're all set to contribute. Get to building!
-
-# Contribution Guidelines (Read me!)
-To keep the project organized and improve efficiency, it's recommended that you familiarize yourself with the contribution guidelines below.
-
-## Project Organization
-For project organization, we generally follow the guidelines provided by the [Godot Docs](https://docs.godotengine.org/en/stable/tutorials/best_practices/project_organization.html). It's recommended that you give this a quick read.
-Some important ones:
-- Use **snake_case** for folder and file names.
-- Use **PascalCase** for node names.
-- In general, keep third-party resources in the top-level `addons/` folder, even if they aren't editor plugins.
-
-## GDScript Style Guide
-For programming in GDScript, we also follow the style guide provided by the [Godot Docs](https://docs.godotengine.org/en/4.4/tutorials/scripting/gdscript/gdscript_styleguide.html). It's recommended that you also give this a quick read.
-Some important guidelines:
-- Follow [these naming conventions](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html#naming-conventions).
-- Use **Tabs** for indentation (editor default)
-- Surround function and class definitions with **two** blank lines.
-- Keep lines of code **under 100 characters**
-- [Format multiline statements for readability](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html#format-multiline-statements-for-readability)
