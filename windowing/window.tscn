@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://eposco7r4gm8"]
+
+[ext_resource type="Script" uid="uid://ccfrhlog00wu1" path="res://windowing/window.gd" id="1_idmct"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pyh71"]
+
+[sub_resource type="QuadMesh" id="QuadMesh_pyh71"]
+
+[node name="Window" type="Node3D" unique_id=2113699973]
+script = ExtResource("1_idmct")
+
+[node name="SubViewport" type="SubViewport" parent="." unique_id=1748640754]
+size = Vector2i(512, 384)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1445981997]
+material_override = SubResource("StandardMaterial3D_pyh71")
+mesh = SubResource("QuadMesh_pyh71")
+skeleton = NodePath("../SubViewport")
