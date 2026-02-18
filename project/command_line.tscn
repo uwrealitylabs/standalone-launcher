@@ -1,17 +1,48 @@
-[gd_scene load_steps=3 format=3 uid="uid://pjen65ktutsy"]
+[gd_scene load_steps=9 format=3 uid="uid://pjen65ktutsy"]
 
+[ext_resource type="Script" uid="uid://d0d2jt4dxyiuq" path="res://project/command_line.gd" id="1_68qia"]
 [ext_resource type="PackedScene" uid="uid://clujaf3u776a3" path="res://addons/godot-xr-tools/objects/viewport_2d_in_3d.tscn" id="1_scxe3"]
 [ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="2_nho3t"]
+[ext_resource type="PackedScene" uid="uid://f6tpqjdmeyft" path="res://project/terminal_ui.tscn" id="3_kt7l4"]
+
+[sub_resource type="QuadMesh" id="QuadMesh_kt7l4"]
+resource_local_to_scene = true
+size = Vector2(1.5, 0.75)
+
+[sub_resource type="ViewportTexture" id="ViewportTexture_plbpt"]
+viewport_path = NodePath("VirtualKeyboard/Viewport")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_f7ji1"]
+cull_mode = 2
+shading_mode = 0
+albedo_texture = SubResource("ViewportTexture_plbpt")
+texture_filter = 1
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_68qia"]
+resource_local_to_scene = true
+size = Vector3(1.5, 0.75, 0.02)
 
 [node name="commandLine" type="Node3D"]
+script = ExtResource("1_68qia")
 
-[node name="Viewport2Din3D" parent="." instance=ExtResource("1_scxe3")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.344, 0)
+[node name="TerminalScreen" parent="." instance=ExtResource("1_scxe3")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.344, -0.2)
 screen_size = Vector2(1, 0.6)
+scene = ExtResource("3_kt7l4")
 viewport_size = Vector2(800, 600)
 transparent = 1
+unshaded = true
 scene_properties_keys = PackedStringArray()
 
 [node name="VirtualKeyboard" parent="." instance=ExtResource("2_nho3t")]
 transform = Transform3D(0.6, 0, 0, 0, 0.50603485, 0.3223798, 0, -0.3223798, 0.50603485, 0, 0, 0)
 scene_properties_keys = PackedStringArray("virtual_keyboard_2d.gd")
+
+[node name="Screen" parent="VirtualKeyboard" index="1"]
+mesh = SubResource("QuadMesh_kt7l4")
+surface_material_override/0 = SubResource("StandardMaterial3D_f7ji1")
+
+[node name="CollisionShape3D" parent="VirtualKeyboard/StaticBody3D" index="0"]
+shape = SubResource("BoxShape3D_68qia")
+
+[editable path="VirtualKeyboard"]
