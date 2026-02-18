@@ -32,5 +32,6 @@ renderer/rendering_method="mobile"
 [xr]
 
 openxr/enabled=true
-openxr/default_action_map=""
+openxr/default_action_map="uid://csbguymeyjym1"
+openxr/extensions/hand_tracking=true
 shaders/enabled=true
