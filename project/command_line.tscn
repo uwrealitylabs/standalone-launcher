@@ -1,21 +1,39 @@
-[gd_scene load_steps=9 format=3 uid="uid://pjen65ktutsy"]
+[gd_scene load_steps=13 format=3 uid="uid://pjen65ktutsy"]
 
 [ext_resource type="Script" uid="uid://d0d2jt4dxyiuq" path="res://project/command_line.gd" id="1_68qia"]
 [ext_resource type="PackedScene" uid="uid://clujaf3u776a3" path="res://addons/godot-xr-tools/objects/viewport_2d_in_3d.tscn" id="1_scxe3"]
 [ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="2_nho3t"]
 [ext_resource type="PackedScene" uid="uid://f6tpqjdmeyft" path="res://project/terminal_ui.tscn" id="3_kt7l4"]
 
+[sub_resource type="QuadMesh" id="QuadMesh_68qia"]
+resource_local_to_scene = true
+size = Vector2(1, 0.6)
+
+[sub_resource type="ViewportTexture" id="ViewportTexture_kt7l4"]
+viewport_path = NodePath("TerminalScreen/Viewport")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_plbpt"]
+transparency = 1
+cull_mode = 2
+shading_mode = 0
+albedo_texture = SubResource("ViewportTexture_kt7l4")
+texture_filter = 1
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_f7ji1"]
+resource_local_to_scene = true
+size = Vector3(1, 0.6, 0.02)
+
 [sub_resource type="QuadMesh" id="QuadMesh_kt7l4"]
 resource_local_to_scene = true
 size = Vector2(1.5, 0.75)
 
-[sub_resource type="ViewportTexture" id="ViewportTexture_plbpt"]
+[sub_resource type="ViewportTexture" id="ViewportTexture_68qia"]
 viewport_path = NodePath("VirtualKeyboard/Viewport")
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_f7ji1"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_kt7l4"]
 cull_mode = 2
 shading_mode = 0
-albedo_texture = SubResource("ViewportTexture_plbpt")
+albedo_texture = SubResource("ViewportTexture_68qia")
 texture_filter = 1
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_68qia"]
@@ -34,15 +52,31 @@ transparent = 1
 unshaded = true
 scene_properties_keys = PackedStringArray()
 
+[node name="Viewport" parent="TerminalScreen" index="0"]
+size = Vector2i(800, 600)
+
+[node name="Screen" parent="TerminalScreen" index="1"]
+mesh = SubResource("QuadMesh_68qia")
+surface_material_override/0 = SubResource("StandardMaterial3D_plbpt")
+
+[node name="StaticBody3D" parent="TerminalScreen" index="2"]
+screen_size = Vector2(1, 0.6)
+viewport_size = Vector2(800, 600)
+
+[node name="CollisionShape3D" parent="TerminalScreen/StaticBody3D" index="0"]
+shape = SubResource("BoxShape3D_f7ji1")
+
 [node name="VirtualKeyboard" parent="." instance=ExtResource("2_nho3t")]
 transform = Transform3D(0.6, 0, 0, 0, 0.50603485, 0.3223798, 0, -0.3223798, 0.50603485, 0, 0, 0)
+input_keyboard = false
 scene_properties_keys = PackedStringArray("virtual_keyboard_2d.gd")
 
 [node name="Screen" parent="VirtualKeyboard" index="1"]
 mesh = SubResource("QuadMesh_kt7l4")
-surface_material_override/0 = SubResource("StandardMaterial3D_f7ji1")
+surface_material_override/0 = SubResource("StandardMaterial3D_kt7l4")
 
 [node name="CollisionShape3D" parent="VirtualKeyboard/StaticBody3D" index="0"]
 shape = SubResource("BoxShape3D_68qia")
 
+[editable path="TerminalScreen"]
 [editable path="VirtualKeyboard"]
