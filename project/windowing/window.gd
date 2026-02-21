@@ -1,4 +1,4 @@
-extends Node3D
+class_name StandaloneWindow extends Node3D
 
 @onready var viewport: SubViewport = $SubViewport
 @onready var mesh: MeshInstance3D = $MeshInstance3D

@@ -2,7 +2,7 @@ extends Node3D
 # Window creator and manager system
 # Instantiates new window using window.tscn template and stores it in an array
 
-var window_scene: PackedScene = preload("res://windowing/window.tscn")
+@export var window_scene: PackedScene
 var windows_list: Array[Node3D] = []
 
 

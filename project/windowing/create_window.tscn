@@ -1,16 +1,18 @@
-[gd_scene format=3 uid="uid://472bs71xj6jd"]
+[gd_scene load_steps=3 format=3 uid="uid://472bs71xj6jd"]
 
-[ext_resource type="Script" uid="uid://cnfbvbavwf6q2" path="res://windowing/window_manager.gd" id="1_hljo6"]
+[ext_resource type="Script" uid="uid://cnfbvbavwf6q2" path="res://project/windowing/window_manager.gd" id="1_hljo6"]
+[ext_resource type="PackedScene" uid="uid://eposco7r4gm8" path="res://project/windowing/window.tscn" id="2_eo8o4"]
 
-[node name="CreateWindow" type="Node3D" unique_id=435953529]
+[node name="CreateWindow" type="Node3D"]
 
-[node name="window_manager" type="Node3D" parent="." unique_id=989382425]
+[node name="window_manager" type="Node3D" parent="."]
 script = ExtResource("1_hljo6")
+window_scene = ExtResource("2_eo8o4")
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=726952151]
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 transform = Transform3D(20, 0, 0, 0, 20, 0, 0, 0, 20, 0, 0, 0)
 
-[node name="Camera3D" type="Camera3D" parent="." unique_id=703357261]
+[node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.9659258, 0.25881904, 0, -0.25881904, 0.9659258, 0, 1.5, 2)
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=612730025]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
