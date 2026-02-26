@@ -22,8 +22,12 @@ layout_mode = 0
 offset_right = 800.0
 offset_bottom = 600.0
 
+[node name="InputLine" type="LineEdit" parent="VBoxContainer"]
+layout_mode = 2
+
 [node name="OutputDisplay" type="RichTextLabel" parent="VBoxContainer"]
 layout_mode = 2
+theme_override_colors/default_color = Color(1, 1, 1, 1)
 theme_override_font_sizes/normal_font_size = 36
 theme_override_font_sizes/bold_font_size = 36
 theme_override_font_sizes/bold_italics_font_size = 36
@@ -31,6 +35,4 @@ theme_override_font_sizes/italics_font_size = 36
 theme_override_font_sizes/mono_font_size = 36
 bbcode_enabled = true
 text = "[color=green]Terminal Ready...[/color]"
-
-[node name="InputLine" type="LineEdit" parent="VBoxContainer"]
-layout_mode = 2
+tab_size = 8
