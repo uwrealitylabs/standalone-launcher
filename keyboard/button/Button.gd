@@ -96,6 +96,3 @@ func _on_property_list_changed():
 	$Label.font_size = min(width, height) * letter_to_button_ratio / $Label.pixel_size 
 	$Label.outline_size = $Label.font_size * outline_to_font_ratio
 	$Label.position.y = depth/2 + 0.001 # Float outside Mesh, avoid jittering
-
-
-

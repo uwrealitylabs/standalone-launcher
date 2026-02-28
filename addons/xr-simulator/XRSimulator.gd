@@ -21,6 +21,8 @@ var toggle_left_controller = false
 var toggle_right_controller = false
 var toggle_shift = false
 
+var input_enabled = true
+
 var key_map = {
 	KEY_1: "by_button",
 	KEY_2: "ax_button",
