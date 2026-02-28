@@ -46,9 +46,9 @@ If successful, the project should open once you click "Import" on the final scre
 
 With that, you're all set to contribute. Get to building!
 
-# Build Instructions
+## Build Instructions
 
-## Setup the Default Scene **(THIS IS WHAT SCENE THE EXECUTABLE WILL START)**
+### Setup the Default Scene **(THIS IS WHAT SCENE THE EXECUTABLE WILL START)**
 
 Navigate to the project settings tab:
 
@@ -94,7 +94,7 @@ Once your done you should see 3 files in your chosen folder like this:
 
 <img width="525" height="71" alt="image" src="https://github.com/user-attachments/assets/63f34254-d758-4d04-b03e-bf2f1f004119" />
 
-## Transfer the exectuatable to the PI
+## Transfer the executable to the PI
 
 Now launch your command promt of choice of navigate to the path your files are in like this:
 
@@ -126,7 +126,7 @@ Now you can launch the application in the console:
 
 <img width="415" height="293" alt="image" src="https://github.com/user-attachments/assets/00f9785a-7916-4587-b563-942a54005f5a" />
 
-if successful you should see this:
+if successful you should see this (or something similar, depending on what the default scene contains):
 
 <img width="1204" height="680" alt="image" src="https://github.com/user-attachments/assets/2a53250f-5913-46f8-a650-8ade6499ffa0" />
 
