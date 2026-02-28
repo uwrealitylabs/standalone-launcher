@@ -3,7 +3,7 @@
 [ext_resource type="Script" uid="uid://bqlkgtmwn4qfr" path="res://project/main/root.gd" id="1_jbgo8"]
 [ext_resource type="PackedScene" uid="uid://d1cjyqd3nylps" path="res://project/xr/xr_player.tscn" id="2_ticcp"]
 [ext_resource type="PackedScene" uid="uid://clc5dre31iskm" path="res://addons/godot-xr-tools/xr/start_xr.tscn" id="3_l66go"]
-[ext_resource type="PackedScene" uid="uid://pjen65ktutsy" path="res://project/command_line.tscn" id="3_ticcp"]
+[ext_resource type="PackedScene" uid="uid://pjen65ktutsy" path="res://project/shell/command_line.tscn" id="3_ticcp"]
 [ext_resource type="PackedScene" uid="uid://c2vufctclqcr3" path="res://project/main/environment.tscn" id="4_5l8kh"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_l8v81"]
@@ -107,13 +107,13 @@ tree_root = SubResource("AnimationNodeBlendTree_ahrxr")
 [node name="PlayerBody" parent="XROrigin3D" index="3"]
 collision_layer = 524289
 
-[node name="commandLine" parent="XROrigin3D" instance=ExtResource("3_ticcp")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.6)
-
 [node name="StartXR" parent="." instance=ExtResource("3_l66go")]
 
 [node name="Environment" parent="." instance=ExtResource("4_5l8kh")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.68150544, 0)
+
+[node name="commandLine" parent="." instance=ExtResource("3_ticcp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2872815, -0.6)
 
 [editable path="XROrigin3D"]
 [editable path="XROrigin3D/XRController3D_left/LeftHand"]

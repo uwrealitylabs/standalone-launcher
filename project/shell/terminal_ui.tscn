@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://f6tpqjdmeyft"]
 
-[ext_resource type="Script" uid="uid://dgrwm54ll7fkc" path="res://project/terminal_ui.gd" id="1_j86h6"]
+[ext_resource type="Script" uid="uid://dgrwm54ll7fkc" path="res://project/shell/terminal_ui.gd" id="1_j86h6"]
 
 [node name="TerminalUI" type="Control"]
 layout_mode = 3
@@ -24,6 +24,7 @@ offset_bottom = 600.0
 
 [node name="InputLine" type="LineEdit" parent="VBoxContainer"]
 layout_mode = 2
+editable = false
 
 [node name="OutputDisplay" type="RichTextLabel" parent="VBoxContainer"]
 layout_mode = 2

@@ -1,7 +1,7 @@
 [gd_scene load_steps=4 format=3 uid="uid://depddl1urdch2"]
 
-[ext_resource type="Script" path="res://keyboard/button/Button.gd" id="1_cl3qk"]
-[ext_resource type="Script" path="res://keyboard/button/Label.gd" id="2_1ngwx"]
+[ext_resource type="Script" uid="uid://cowhv8lxjqbal" path="res://keyboard/button/Button.gd" id="1_cl3qk"]
+[ext_resource type="Script" uid="uid://qtgleylrbd7" path="res://keyboard/button/Label.gd" id="2_1ngwx"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_7abuy"]
 size = Vector3(0.03, 0.015, 0.03)
@@ -16,12 +16,12 @@ collision_mask = 131072
 monitorable = false
 
 [node name="CollisionPolygon3D" type="CollisionPolygon3D" parent="Area3D"]
-depth = 0.0
-polygon = PackedVector2Array(0, 0, 0, 0, 0, 0, 0, 0)
+depth = 0.01
+polygon = PackedVector2Array(0.005, 0.0025, 0.005, -0.0025, -0.005, -0.0025, -0.005, 0.0025)
 margin = 0.001
 
 [node name="Label" type="Label3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 0.0085, 0)
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 0.0084999995, 0)
 pixel_size = 0.001
 double_sided = false
 font_size = 23
@@ -29,7 +29,6 @@ outline_size = 6
 script = ExtResource("2_1ngwx")
 
 [node name="Keysound" type="AudioStreamPlayer3D" parent="."]
-stream = null
 volume_db = -10.0
 
 [connection signal="property_list_changed" from="." to="." method="_on_property_list_changed"]
