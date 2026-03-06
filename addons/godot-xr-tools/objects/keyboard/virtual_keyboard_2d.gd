@@ -2,6 +2,8 @@
 class_name XRToolsVirtualKeyboard2D
 extends CanvasLayer
 
+signal key_pressed(event: InputEventKey)
+
 
 ## Enumeration of keyboard view modes
 enum KeyboardMode {
@@ -33,7 +35,7 @@ func is_xr_class(xr_name:  String) -> bool:
 func on_key_pressed(scan_code_text: String, unicode: int, shift: bool):
 	# Find the scan code
 	var scan_code := OS.find_keycode_from_string(scan_code_text)
-
+	
 	# Create the InputEventKey
 	var input := InputEventKey.new()
 	input.physical_keycode = scan_code
@@ -44,6 +46,7 @@ func on_key_pressed(scan_code_text: String, unicode: int, shift: bool):
 
 	# Dispatch the input event
 	Input.parse_input_event(input)
+	key_pressed.emit(input)
 
 	# Pop any temporary shift key
 	if _shift_down:

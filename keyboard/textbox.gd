@@ -53,5 +53,3 @@ func is_ascii(keycode: Key):
 
 func is_digit(keycode: Key):
 	return KEY_0 <= keycode and keycode <= KEY_9
-
-
