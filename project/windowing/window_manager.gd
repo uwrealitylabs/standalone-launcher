@@ -5,7 +5,6 @@ extends Node3D
 @export var window_scene: PackedScene
 var windows_list: Array[Node3D] = []
 
-
 func create_window(position: Vector3 = Vector3.ZERO) -> Node3D:
 	var win = window_scene.instantiate()
 	win.position = position
@@ -13,6 +12,13 @@ func create_window(position: Vector3 = Vector3.ZERO) -> Node3D:
 	windows_list.append(win)
 	return win
 
+func destroy_window(win: Node3D) -> void:
+	if win in windows_list:
+		win.close()
+
+# Remove window from window manager list
+func _on_window_closed(win: Node3D) -> void:
+	windows_list.erase(win)
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -21,10 +27,14 @@ func _ready() -> void:
 	var rect1 = ColorRect.new()
 	rect1.color = Color.SKY_BLUE
 	rect1.set_anchors_preset(Control.PRESET_FULL_RECT)
-	win1.get_node("SubViewport").add_child(rect1)
+	win1.set_content(rect1)
 	
 	var win2 = create_window(Vector3(1.2, 0.5, 0))
 	var rect2 = ColorRect.new()
 	rect2.color = Color.PALE_VIOLET_RED
 	rect2.set_anchors_preset(Control.PRESET_FULL_RECT)
-	win2.get_node("SubViewport").add_child(rect2)
+	win2.set_content(rect2)
+	
+	# Manually testing the close function
+	await get_tree().create_timer(3.0).timeout
+	win2.close()
