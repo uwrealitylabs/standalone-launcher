@@ -5,6 +5,8 @@ class_name StandaloneWindow extends Node3D
 @onready var content_container: Control = $SubViewport/VBoxContainer/ContentContainer
 @onready var close_button: Button = $SubViewport/VBoxContainer/HBoxContainer/CloseButton
 
+signal on_closed()
+
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	# Create a material that will display SubViewport content
@@ -14,14 +16,9 @@ func _ready() -> void:
 	mesh.material_override = mat
 	close_button.text = "x"
 	close_button.pressed.connect(close)
-	
-	# Force the color cuz i cant find it on inspector
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color.BLACK
-	$SubViewport/VBoxContainer/HBoxContainer/Label.add_theme_stylebox_override("normal", style)
 
 func set_content(content: Control) -> void:
-	_clear_content
+	_clear_content()
 	content_container.add_child(content)
 
 # This isn't really used right now, but in the future when we need to display more complex
@@ -38,6 +35,5 @@ func _clear_content() -> void:
 # The window's self-cleaning function that destroys window content
 func close() -> void:
 	_clear_content()
-	var manager = get_parent()
-	manager._on_window_closed(self)
+	on_closed.emit()
 	queue_free()

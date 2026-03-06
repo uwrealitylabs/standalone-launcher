@@ -5,11 +5,12 @@ extends Node3D
 @export var window_scene: PackedScene
 var windows_list: Array[Node3D] = []
 
-func create_window(position: Vector3 = Vector3.ZERO) -> Node3D:
-	var win = window_scene.instantiate()
-	win.position = position
+func create_window(pos: Vector3 = Vector3.ZERO) -> Node3D:
+	var win: StandaloneWindow = window_scene.instantiate()
+	win.position = pos
 	add_child(win)
 	windows_list.append(win)
+	win.on_closed.connect(func(): _on_window_closed(win))
 	return win
 
 func destroy_window(win: Node3D) -> void:
@@ -18,9 +19,9 @@ func destroy_window(win: Node3D) -> void:
 
 # Remove window from window manager list
 func _on_window_closed(win: Node3D) -> void:
+	print("removed from window list")
 	windows_list.erase(win)
 
-# Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	# Create test windows, delete in future
 	var win1 = create_window(Vector3(-1.2, 0.5, 0))
