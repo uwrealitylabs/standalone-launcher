@@ -1,14 +1,18 @@
-[gd_scene format=3 uid="uid://bx5my3gah4snb"]
+[gd_scene load_steps=25 format=3 uid="uid://bx5my3gah4snb"]
 
 [ext_resource type="Script" uid="uid://bqlkgtmwn4qfr" path="res://project/main/root.gd" id="1_jbgo8"]
 [ext_resource type="PackedScene" uid="uid://d1cjyqd3nylps" path="res://project/xr/xr_player.tscn" id="2_ticcp"]
+[ext_resource type="Script" uid="uid://bt4an45w131ik" path="res://project/interaction/hand_pointer.gd" id="3_5l8kh"]
 [ext_resource type="PackedScene" uid="uid://clc5dre31iskm" path="res://addons/godot-xr-tools/xr/start_xr.tscn" id="3_l66go"]
 [ext_resource type="PackedScene" uid="uid://pjen65ktutsy" path="res://project/shell/command_line.tscn" id="3_ticcp"]
 [ext_resource type="PackedScene" uid="uid://c2vufctclqcr3" path="res://project/main/environment.tscn" id="4_5l8kh"]
+[ext_resource type="PackedScene" uid="uid://cqhw276realc" path="res://addons/godot-xr-tools/functions/function_pointer.tscn" id="4_41lny"]
+[ext_resource type="Script" uid="uid://cnfbvbavwf6q2" path="res://project/windowing/window_manager.gd" id="8_6miyk"]
+[ext_resource type="PackedScene" uid="uid://eposco7r4gm8" path="res://project/windowing/window.tscn" id="9_07eh6"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_l8v81"]
-sky_top_color = Color(3.272891e-06, 0.71454203, 0.82493913, 1)
-sky_horizon_color = Color(0.9679766, 0.5361268, 0.72009045, 1)
+sky_top_color = Color(0.7164733, 0.6269366, 0.43380052, 1)
+sky_horizon_color = Color(0.94093066, 0.5708659, 0.65777236, 1)
 ground_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
 
 [sub_resource type="Sky" id="Sky_vyht1"]
@@ -82,13 +86,13 @@ nodes/Trigger/node = SubResource("AnimationNodeBlend2_6ma1x")
 nodes/Trigger/position = Vector2(-360, 40)
 node_connections = [&"output", 0, &"Grip", &"Grip", 0, &"Trigger", &"Grip", 1, &"ClosedHand2", &"Trigger", 0, &"OpenHand", &"Trigger", 1, &"ClosedHand1"]
 
-[node name="Root" type="Node3D" unique_id=36189397]
+[node name="Root" type="Node3D"]
 script = ExtResource("1_jbgo8")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=511953275]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_bf3um")
 
-[node name="XROrigin3D" parent="." unique_id=180964810 instance=ExtResource("2_ticcp")]
+[node name="XROrigin3D" parent="." instance=ExtResource("2_ticcp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2872815, 0)
 
 [node name="XRCamera3D" parent="XROrigin3D" index="0"]
@@ -98,25 +102,45 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.155, 0)
 strafe = false
 enabled = false
 
+[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_left/LeftHand/Hand_Nails_low_L/Armature/Skeleton3D/BoneAttachment3D" index="1"]
+target_position = Vector3(0, 0, -7)
+
+[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_left/LeftHand/Hand_Nails_low_L/Armature/Skeleton3D/BoneAttachment3D" index="2"]
+script = ExtResource("3_5l8kh")
+
 [node name="AnimationTree" parent="XROrigin3D/XRController3D_left/LeftHand" index="1"]
 tree_root = SubResource("AnimationNodeBlendTree_07eh6")
+
+[node name="FunctionPointer" parent="XROrigin3D/XRController3D_left" index="3" instance=ExtResource("4_41lny")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.02, 0.05, -0.1)
+
+[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_right/RightHand/Hand_Nails_low_R/Armature/Skeleton3D/BoneAttachment3D" index="1"]
+target_position = Vector3(0, 0, -7)
+collision_mask = 4194304
+
+[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_right/RightHand/Hand_Nails_low_R/Armature/Skeleton3D/BoneAttachment3D" index="2"]
+script = ExtResource("3_5l8kh")
 
 [node name="AnimationTree" parent="XROrigin3D/XRController3D_right/RightHand" index="1"]
 tree_root = SubResource("AnimationNodeBlendTree_ahrxr")
 
+[node name="FunctionPointer" parent="XROrigin3D/XRController3D_right" index="4" instance=ExtResource("4_41lny")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.02, 0.05, -0.1)
+
 [node name="PlayerBody" parent="XROrigin3D" index="3"]
 collision_layer = 524289
 
-[node name="commandLine" parent="XROrigin3D" unique_id=381890937 instance=ExtResource("3_ticcp")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.6)
+[node name="StartXR" parent="." instance=ExtResource("3_l66go")]
 
-[node name="StartXR" parent="." unique_id=73194486 instance=ExtResource("3_l66go")]
-
-[node name="Environment" parent="." unique_id=450250595 instance=ExtResource("4_5l8kh")]
+[node name="Environment" parent="." instance=ExtResource("4_5l8kh")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.68150544, 0)
 
 [node name="commandLine" parent="." instance=ExtResource("3_ticcp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2872815, -0.6)
+
+[node name="WindowManager" type="Node3D" parent="."]
+script = ExtResource("8_6miyk")
+window_scene = ExtResource("9_07eh6")
 
 [editable path="XROrigin3D"]
 [editable path="XROrigin3D/XRController3D_left/LeftHand"]
