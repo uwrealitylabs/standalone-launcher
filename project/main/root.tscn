@@ -1,4 +1,4 @@
-[gd_scene load_steps=23 format=3 uid="uid://bx5my3gah4snb"]
+[gd_scene load_steps=25 format=3 uid="uid://bx5my3gah4snb"]
 
 [ext_resource type="Script" uid="uid://bqlkgtmwn4qfr" path="res://project/main/root.gd" id="1_jbgo8"]
 [ext_resource type="PackedScene" uid="uid://d1cjyqd3nylps" path="res://project/xr/xr_player.tscn" id="2_ticcp"]
@@ -7,10 +7,12 @@
 [ext_resource type="PackedScene" uid="uid://pjen65ktutsy" path="res://project/shell/command_line.tscn" id="3_ticcp"]
 [ext_resource type="PackedScene" uid="uid://c2vufctclqcr3" path="res://project/main/environment.tscn" id="4_5l8kh"]
 [ext_resource type="PackedScene" uid="uid://cqhw276realc" path="res://addons/godot-xr-tools/functions/function_pointer.tscn" id="4_41lny"]
+[ext_resource type="Script" uid="uid://cnfbvbavwf6q2" path="res://project/windowing/window_manager.gd" id="8_6miyk"]
+[ext_resource type="PackedScene" uid="uid://eposco7r4gm8" path="res://project/windowing/window.tscn" id="9_07eh6"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_l8v81"]
-sky_top_color = Color(3.272891e-06, 0.71454203, 0.82493913, 1)
-sky_horizon_color = Color(0.9679766, 0.5361268, 0.72009045, 1)
+sky_top_color = Color(0.7164733, 0.6269366, 0.43380052, 1)
+sky_horizon_color = Color(0.94093066, 0.5708659, 0.65777236, 1)
 ground_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
 
 [sub_resource type="Sky" id="Sky_vyht1"]
@@ -128,9 +130,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.02, 0.05, -0.1)
 [node name="PlayerBody" parent="XROrigin3D" index="3"]
 collision_layer = 524289
 
-[node name="commandLine" parent="XROrigin3D" instance=ExtResource("3_ticcp")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.6)
-
 [node name="StartXR" parent="." instance=ExtResource("3_l66go")]
 
 [node name="Environment" parent="." instance=ExtResource("4_5l8kh")]
@@ -138,6 +137,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.68150544, 0)
 
 [node name="commandLine" parent="." instance=ExtResource("3_ticcp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2872815, -0.6)
+
+[node name="WindowManager" type="Node3D" parent="."]
+script = ExtResource("8_6miyk")
+window_scene = ExtResource("9_07eh6")
 
 [editable path="XROrigin3D"]
 [editable path="XROrigin3D/XRController3D_left/LeftHand"]
