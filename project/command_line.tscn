@@ -1,8 +1,8 @@
-[gd_scene load_steps=12 format=3 uid="uid://b2q5k460xofoq"]
+[gd_scene load_steps=12 format=3 uid="uid://d3isw5vskyv87"]
 
 [ext_resource type="PackedScene" uid="uid://clujaf3u776a3" path="res://addons/godot-xr-tools/objects/viewport_2d_in_3d.tscn" id="1_scxe3"]
 [ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="2_nho3t"]
-[ext_resource type="PackedScene" uid="uid://rivxomvetohf" path="res://project/terminal_ui.tscn" id="3_kt7l4"]
+[ext_resource type="PackedScene" path="res://project/terminal_ui.tscn" id="3_kt7l4"]
 
 [sub_resource type="QuadMesh" id="QuadMesh_68qia"]
 resource_local_to_scene = true

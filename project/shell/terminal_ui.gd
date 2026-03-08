@@ -1,9 +1,6 @@
 class_name TerminalUi
 extends Control
 
-@warning_ignore("shadowed_global_identifier")
-const AsyncCommand = preload("res://project/shell/async_command.gd")
-
 @onready var input_line: LineEdit = $VBoxContainer/InputLine
 @onready var output_display: RichTextLabel = $VBoxContainer/OutputDisplay
 
