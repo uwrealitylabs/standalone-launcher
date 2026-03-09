@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3 uid="uid://bx5my3gah4snb"]
+[gd_scene format=3 uid="uid://bx5my3gah4snb"]
 
 [ext_resource type="Script" uid="uid://bqlkgtmwn4qfr" path="res://project/main/root.gd" id="1_jbgo8"]
 [ext_resource type="PackedScene" uid="uid://d1cjyqd3nylps" path="res://project/xr/xr_player.tscn" id="2_ticcp"]
@@ -82,13 +82,13 @@ nodes/Trigger/node = SubResource("AnimationNodeBlend2_6ma1x")
 nodes/Trigger/position = Vector2(-360, 40)
 node_connections = [&"output", 0, &"Grip", &"Grip", 0, &"Trigger", &"Grip", 1, &"ClosedHand2", &"Trigger", 0, &"OpenHand", &"Trigger", 1, &"ClosedHand1"]
 
-[node name="Root" type="Node3D"]
+[node name="Root" type="Node3D" unique_id=36189397]
 script = ExtResource("1_jbgo8")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=511953275]
 environment = SubResource("Environment_bf3um")
 
-[node name="XROrigin3D" parent="." instance=ExtResource("2_ticcp")]
+[node name="XROrigin3D" parent="." unique_id=180964810 instance=ExtResource("2_ticcp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2872815, 0)
 
 [node name="XRCamera3D" parent="XROrigin3D" index="0"]
@@ -107,9 +107,12 @@ tree_root = SubResource("AnimationNodeBlendTree_ahrxr")
 [node name="PlayerBody" parent="XROrigin3D" index="3"]
 collision_layer = 524289
 
-[node name="StartXR" parent="." instance=ExtResource("3_l66go")]
+[node name="commandLine" parent="XROrigin3D" unique_id=381890937 instance=ExtResource("3_ticcp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.6)
 
-[node name="Environment" parent="." instance=ExtResource("4_5l8kh")]
+[node name="StartXR" parent="." unique_id=73194486 instance=ExtResource("3_l66go")]
+
+[node name="Environment" parent="." unique_id=450250595 instance=ExtResource("4_5l8kh")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.68150544, 0)
 
 [node name="commandLine" parent="." instance=ExtResource("3_ticcp")]
