@@ -12,6 +12,7 @@ var _dragging   := false
 var _drag_offset := Vector3.ZERO
 @onready var content_container: Control = $SubViewport/VBoxContainer/ContentContainer
 @onready var close_button: Button = $SubViewport/VBoxContainer/HBoxContainer/CloseButton
+@export var follow_speed: float = 15.0 #can change speed depending on what we want
 
 signal on_closed()
 
@@ -33,6 +34,13 @@ func start_drag(hit_world: Vector3) -> void:
 	_dragging = true
 	_drag_offset = global_position - hit_world
 
+func update_drag(hit_world: Vector3, delta: float) -> void:
+    if not _dragging:
+        return
+    var target_pos = _clamp_to_bounds(hit_world + _drag_offset)
+    global_position = global_position.lerp(target_pos, 1.0 - exp(-follow_speed * delta))
+    _face_user()
+
 # This isn't really used right now, but in the future when we need to display more complex
 # applications on the window, it will prolly be a PackedScene
 func set_content_scene(content_scene: PackedScene) -> void:
@@ -50,6 +58,18 @@ func _clamp_to_bounds(pos: Vector3) -> Vector3:
 	pos.y = clamp(pos.y, world_bounds.position.y, world_bounds.end.y)
 	pos.z = clamp(pos.z, world_bounds.position.z, world_bounds.end.z)
 	return pos
+
+#Helper function so that the window always faces the user and doesn't tilt around
+func _face_user() -> void:
+    var camera = get_viewport().get_camera_3d()
+    if not camera:
+        return
+    var target_pos = camera.global_position
+    target_pos.y = global_position.y 
+    
+    look_at(target_pos, Vector3.UP)
+ 
+    rotate_object_local(Vector3.UP, PI) #TODO may need to flip around to face -Z
 
 # The window's self-cleaning function that destroys window content
 func close() -> void:
