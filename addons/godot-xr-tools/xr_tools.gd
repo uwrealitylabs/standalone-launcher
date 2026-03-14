@@ -389,7 +389,7 @@ static func get_aim_offset(mode : HandOffsetMode, xr_controller : XRController3D
 		if xr_controller.tracker != "left_hand":
 			is_left_hand = false
 
-		var xr_tracker : XRControllerTracker = XRServer.get_tracker(xr_controller.tracker)
+		var xr_tracker = XRServer.get_tracker(xr_controller.tracker)
 		if xr_tracker:
 			profile = xr_tracker.profile
 
