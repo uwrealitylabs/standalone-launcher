@@ -115,14 +115,7 @@ func _on_window_focused(win: StandaloneWindow) -> void:
 
 
 func _ready() -> void:
-	var win1 = create_window(Vector3(-0.3, 1.5, -2.0))
-	var rect1 = ColorRect.new()
-	rect1.color = Color.SKY_BLUE
-	rect1.set_anchors_preset(Control.PRESET_FULL_RECT)
-	win1.set_content(rect1)
-
-	var win2 = create_window(Vector3(0.3, 1.5, -2.0))
-	var rect2 = ColorRect.new()
-	rect2.color = Color.PALE_VIOLET_RED
-	rect2.set_anchors_preset(Control.PRESET_FULL_RECT)
-	win2.set_content(rect2)
+	var win1: StandaloneWindow = create_window(Vector3(-0.3, 1.5, -2.0))
+	create_window(Vector3(0.3, 1.5, -2.0))
+	
+	win1.focus()

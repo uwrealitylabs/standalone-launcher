@@ -69,7 +69,7 @@ func _on_submit(cmd: String) -> void:
 		output_display.clear()
 		return
 
-	# run command asynchronously (no freeze)
+	# run command asynchronously
 	is_running = true
 	stdout("[color=yellow]Running...[/color]")
 

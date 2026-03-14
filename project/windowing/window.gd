@@ -1,10 +1,6 @@
 class_name StandaloneWindow extends Node3D
 
-@onready var viewport: SubViewport = $SubViewport
-@onready var mesh: MeshInstance3D = $MeshInstance3D
-@onready var content_container: Control = $SubViewport/VBoxContainer/ContentContainer
-@onready var close_button: Button = $SubViewport/VBoxContainer/HBoxContainer/CloseButton
-@onready var static_body: StaticBody3D = $StaticBody3D
+@export var content: PackedScene
 
 signal on_closed()
 signal on_focused(win: StandaloneWindow)
@@ -23,30 +19,26 @@ func _ready() -> void:
 	# This stores original position
 	base_position = position
 
-	# create a material that will display SubViewport content
-	var mat := StandardMaterial3D.new()
-	mat.albedo_texture = viewport.get_texture()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mesh.material_override = mat
+	var window_header: SWindowHeader = $Header.get_scene_instance()
+	window_header.close_pressed.connect(close)
+	
+	set_content(content)
+	
+	# Focus on any pointer event on this window
+	$Header.pointer_event.connect(_on_pointer_event)
+	$Content.pointer_event.connect(_on_pointer_event)
+	
 
-	close_button.text = "x"
-	close_button.pressed.connect(close)
-
-
-func set_content(content: Control) -> void:
-	_clear_content()
-	content_container.add_child(content)
-
-
-func set_content_scene(content_scene: PackedScene) -> void:
-	_clear_content()
-	var content = content_scene.instantiate()
-	content_container.add_child(content)
+## Invoked when a pointer event on the window is detected
+func _on_pointer_event(event: XRToolsPointerEvent):
+	if event.event_type == XRToolsPointerEvent.Type.PRESSED:
+		focus()
 
 
-func _clear_content() -> void:
-	for child in content_container.get_children():
-		child.queue_free()
+## Sets the window's content to the given UI scene
+func set_content(new_content: PackedScene) -> void:
+	$Content.set_scene(new_content)
+	content = new_content
 
 
 ## Call this to tell the window manager to bring this window to front
@@ -61,7 +53,7 @@ func apply_z_order() -> void:
 
 ## Visual feedback when the current window becomes the focused window
 func set_focused_visual(is_focused: bool) -> void:
-	var mat = mesh.material_override as StandardMaterial3D
+	var mat = $Header/Screen.material_override as StandardMaterial3D
 	if not mat:
 		return
 ##67 :)
@@ -72,6 +64,5 @@ func set_focused_visual(is_focused: bool) -> void:
 
 ## Self-cleaning function that destroys window content
 func close() -> void:
-	_clear_content()
 	on_closed.emit()
 	queue_free()
