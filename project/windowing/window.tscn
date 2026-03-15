@@ -1,6 +1,6 @@
 [gd_scene load_steps=11 format=3 uid="uid://eposco7r4gm8"]
 
-[ext_resource type="Script" uid="uid://ccfrhlog00wu1" path="res://project/windowing/window.gd" id="1_idmct"]
+[ext_resource type="Script" uid="uid://ccfrhlog00wu1" path="res://project/windowing/swindow.gd" id="1_idmct"]
 [ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="2_5i7x0"]
 [ext_resource type="PackedScene" uid="uid://dolm6lyyt0336" path="res://project/windowing/window_header.tscn" id="2_832o4"]
 [ext_resource type="PackedScene" uid="uid://dsspyu52mpyhh" path="res://project/windowing/window_placeholder_content.tscn" id="2_hnifa"]
@@ -9,31 +9,33 @@
 resource_local_to_scene = true
 size = Vector2(1.5, 0.75)
 
-[sub_resource type="ViewportTexture" id="ViewportTexture_832o4"]
+[sub_resource type="ViewportTexture" id="ViewportTexture_5i7x0"]
 viewport_path = NodePath("Header/Viewport")
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_5i7x0"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hnifa"]
 cull_mode = 2
 shading_mode = 0
-albedo_texture = SubResource("ViewportTexture_832o4")
+albedo_texture = SubResource("ViewportTexture_5i7x0")
 texture_filter = 1
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_td1wq"]
 resource_local_to_scene = true
 size = Vector3(1.5, 0.75, 0.02)
 
-[sub_resource type="ViewportTexture" id="ViewportTexture_hnifa"]
+[sub_resource type="ViewportTexture" id="ViewportTexture_7asek"]
 viewport_path = NodePath("Content/Viewport")
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7asek"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ell4n"]
 cull_mode = 2
 shading_mode = 0
-albedo_texture = SubResource("ViewportTexture_hnifa")
+albedo_texture = SubResource("ViewportTexture_7asek")
 texture_filter = 1
 
-[node name="Window" type="Node3D"]
+[node name="Window" type="Node3D" node_paths=PackedStringArray("header_3d", "content_3d")]
 script = ExtResource("1_idmct")
 content = ExtResource("2_hnifa")
+header_3d = NodePath("Header")
+content_3d = NodePath("Content")
 metadata/_custom_type_script = "uid://eavk7267igp7"
 
 [node name="Header" parent="." instance=ExtResource("2_5i7x0")]
@@ -47,7 +49,7 @@ size = Vector2i(399, 20)
 
 [node name="Screen" parent="Header" index="1"]
 mesh = SubResource("QuadMesh_hnifa")
-surface_material_override/0 = SubResource("StandardMaterial3D_5i7x0")
+surface_material_override/0 = SubResource("StandardMaterial3D_hnifa")
 
 [node name="StaticBody3D" parent="Header" index="2"]
 viewport_size = Vector2(399.93, 20)
@@ -61,7 +63,7 @@ scene_properties_keys = PackedStringArray()
 
 [node name="Screen" parent="Content" index="1"]
 mesh = SubResource("QuadMesh_hnifa")
-surface_material_override/0 = SubResource("StandardMaterial3D_7asek")
+surface_material_override/0 = SubResource("StandardMaterial3D_ell4n")
 
 [node name="CollisionShape3D" parent="Content/StaticBody3D" index="0"]
 shape = SubResource("BoxShape3D_td1wq")
