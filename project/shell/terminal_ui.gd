@@ -19,7 +19,11 @@ func _process(_delta):
 
 
 ## Handles key input into the terminal
-func key_input(input: InputEventKey) -> void:
+func _input(input: InputEvent) -> void:
+	var key_input: InputEventKey = input as InputEventKey
+	if not key_input:
+		return
+		
 	print("input received")
 	if not input.pressed:
 		return
@@ -69,7 +73,7 @@ func _on_submit(cmd: String) -> void:
 		output_display.clear()
 		return
 
-	# run command asynchronously (no freeze)
+	# run command asynchronously
 	is_running = true
 	stdout("[color=yellow]Running...[/color]")
 

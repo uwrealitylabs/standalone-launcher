@@ -1,63 +1,72 @@
-[gd_scene load_steps=7 format=3 uid="uid://eposco7r4gm8"]
+[gd_scene load_steps=11 format=3 uid="uid://eposco7r4gm8"]
 
-[ext_resource type="Script" uid="uid://ccfrhlog00wu1" path="res://project/windowing/window.gd" id="1_idmct"]
-[ext_resource type="Script" uid="uid://desfgli6q56cd" path="res://project/windowing/window_body.gd" id="2_q053q"]
+[ext_resource type="Script" uid="uid://ccfrhlog00wu1" path="res://project/windowing/swindow.gd" id="1_idmct"]
+[ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="2_5i7x0"]
+[ext_resource type="PackedScene" uid="uid://dolm6lyyt0336" path="res://project/windowing/window_header.tscn" id="2_832o4"]
+[ext_resource type="PackedScene" uid="uid://dsspyu52mpyhh" path="res://project/windowing/window_placeholder_content.tscn" id="2_hnifa"]
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_jf55e"]
-bg_color = Color(0, 0, 0, 1)
+[sub_resource type="QuadMesh" id="QuadMesh_hnifa"]
+resource_local_to_scene = true
+size = Vector2(1.5, 0.75)
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pyh71"]
+[sub_resource type="ViewportTexture" id="ViewportTexture_5i7x0"]
+viewport_path = NodePath("Header/Viewport")
 
-[sub_resource type="QuadMesh" id="QuadMesh_pyh71"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hnifa"]
+cull_mode = 2
+shading_mode = 0
+albedo_texture = SubResource("ViewportTexture_5i7x0")
+texture_filter = 1
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_jf55e"]
-size = Vector3(1, 1, 0.2)
+[sub_resource type="BoxShape3D" id="BoxShape3D_td1wq"]
+resource_local_to_scene = true
+size = Vector3(1.5, 0.75, 0.02)
 
-[node name="Window" type="Node3D"]
+[sub_resource type="ViewportTexture" id="ViewportTexture_7asek"]
+viewport_path = NodePath("Content/Viewport")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ell4n"]
+cull_mode = 2
+shading_mode = 0
+albedo_texture = SubResource("ViewportTexture_7asek")
+texture_filter = 1
+
+[node name="Window" type="Node3D" node_paths=PackedStringArray("header_3d", "content_3d")]
 script = ExtResource("1_idmct")
+content = ExtResource("2_hnifa")
+header_3d = NodePath("Header")
+content_3d = NodePath("Content")
+metadata/_custom_type_script = "uid://eavk7267igp7"
 
-[node name="SubViewport" type="SubViewport" parent="."]
-size = Vector2i(512, 384)
+[node name="Header" parent="." instance=ExtResource("2_5i7x0")]
+transform = Transform3D(1, 0, 0, 0, 0.1, 0, 0, 0, 1, 0, 0.41172367, 0)
+scene = ExtResource("2_832o4")
+viewport_size = Vector2(399.93, 20)
+scene_properties_keys = PackedStringArray("window_header.gd")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="SubViewport"]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/separation = 0
+[node name="Viewport" parent="Header" index="0"]
+size = Vector2i(399, 20)
 
-[node name="HBoxContainer" type="HBoxContainer" parent="SubViewport/VBoxContainer"]
-custom_minimum_size = Vector2(0, 32)
-layout_mode = 2
-theme_override_constants/separation = 0
+[node name="Screen" parent="Header" index="1"]
+mesh = SubResource("QuadMesh_hnifa")
+surface_material_override/0 = SubResource("StandardMaterial3D_hnifa")
 
-[node name="Label" type="Label" parent="SubViewport/VBoxContainer/HBoxContainer"]
-custom_minimum_size = Vector2(0, 32)
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_styles/normal = SubResource("StyleBoxFlat_jf55e")
-text = "Untitled"
-horizontal_alignment = 3
+[node name="StaticBody3D" parent="Header" index="2"]
+viewport_size = Vector2(399.93, 20)
 
-[node name="CloseButton" type="Button" parent="SubViewport/VBoxContainer/HBoxContainer"]
-custom_minimum_size = Vector2(0, 32)
-layout_mode = 2
-size_flags_horizontal = 8
-theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+[node name="CollisionShape3D" parent="Header/StaticBody3D" index="0"]
+shape = SubResource("BoxShape3D_td1wq")
 
-[node name="ContentContainer" type="Control" parent="SubViewport/VBoxContainer"]
-layout_mode = 2
-size_flags_vertical = 3
+[node name="Content" parent="." instance=ExtResource("2_5i7x0")]
+scene = null
+scene_properties_keys = PackedStringArray()
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
-material_override = SubResource("StandardMaterial3D_pyh71")
-mesh = SubResource("QuadMesh_pyh71")
-skeleton = NodePath("../SubViewport")
+[node name="Screen" parent="Content" index="1"]
+mesh = SubResource("QuadMesh_hnifa")
+surface_material_override/0 = SubResource("StandardMaterial3D_ell4n")
 
-[node name="StaticBody3D" type="StaticBody3D" parent="."]
-collision_layer = 5242881
-script = ExtResource("2_q053q")
+[node name="CollisionShape3D" parent="Content/StaticBody3D" index="0"]
+shape = SubResource("BoxShape3D_td1wq")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
-shape = SubResource("BoxShape3D_jf55e")
+[editable path="Header"]
+[editable path="Content"]

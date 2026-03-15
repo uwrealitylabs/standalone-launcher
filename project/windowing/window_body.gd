@@ -9,6 +9,6 @@ func _ready():
 func _on_pointer_event(event: XRToolsPointerEvent) -> void:
 	# detect a press event (finger tap or trigger click)
 	if event.event_type == XRToolsPointerEvent.Type.PRESSED:
-		var window = get_parent() as StandaloneWindow
+		var window = get_parent() as SWindow
 		if window:
 			window.focus()
