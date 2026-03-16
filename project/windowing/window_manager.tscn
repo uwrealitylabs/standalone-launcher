@@ -1,0 +1,10 @@
+[gd_scene load_steps=4 format=3 uid="uid://cnhkl3h5plg3f"]
+
+[ext_resource type="Script" uid="uid://cnfbvbavwf6q2" path="res://project/windowing/window_manager.gd" id="1_kmgho"]
+[ext_resource type="PackedScene" uid="uid://eposco7r4gm8" path="res://project/windowing/window.tscn" id="2_8jtpn"]
+[ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="3_atn78"]
+
+[node name="WindowManager" type="Node"]
+script = ExtResource("1_kmgho")
+window = ExtResource("2_8jtpn")
+keyboard = ExtResource("3_atn78")

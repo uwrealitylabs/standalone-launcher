@@ -1,0 +1,43 @@
+[gd_scene load_steps=3 format=3 uid="uid://dolm6lyyt0336"]
+
+[ext_resource type="Script" uid="uid://dedhc0rag8x84" path="res://project/windowing/window_header.gd" id="1_p5jkc"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_7sy06"]
+bg_color = Color(0, 0, 0, 1)
+
+[node name="WindowHeader" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_p5jkc")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="."]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 0
+
+[node name="Label" type="Label" parent="HBoxContainer"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 1
+theme_override_styles/normal = SubResource("StyleBoxFlat_7sy06")
+text = "Untitled"
+horizontal_alignment = 3
+vertical_alignment = 1
+
+[node name="CloseButton" type="Button" parent="HBoxContainer"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 8
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+text = "x
+"

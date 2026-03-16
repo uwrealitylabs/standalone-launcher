@@ -4,7 +4,6 @@ extends Node3D
 @export var terminal_3d: XRToolsViewport2DIn3D
 
 func _ready() -> void:
-	print("check5")
 	_connect_keyboard()
 
 ## Link virtual keyboard input to the terminal
