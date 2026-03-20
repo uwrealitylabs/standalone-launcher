@@ -244,8 +244,22 @@ func _reposition_header() -> void:
 	if header_node:
 		header_node.position.y = (content_size.y / 2.0) + (HEADER_HEIGHT / 2.0)
 
+
+# Invoked when a resize handle's pointer event signal is received
+func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> void:
+	match event.event_type:
+		XRToolsPointerEvent.Type.PRESSED:
+			start_resize(handle_id, event.position)
+		XRToolsPointerEvent.Type.MOVED:
+			update_resize(event.position)
+		XRToolsPointerEvent.Type.RELEASED:
+			stop_resize()
+		_:
+			pass
+
 # Create the handles for users to grab onto, only show when hovering near
 func _rebuild_resize_handles() -> void:
+	print("rebuilding resize handles...")
 	# remove old handles first
 	var old = get_node_or_null("ResizeHandles")
 	if old:
@@ -273,6 +287,7 @@ func _rebuild_resize_handles() -> void:
 	}
 
 	for handle_id in handles:
+		print("adding handle " + handle_id)
 		var area  = Area3D.new()
 		var col   = CollisionShape3D.new()
 		var shape = BoxShape3D.new()
@@ -281,6 +296,9 @@ func _rebuild_resize_handles() -> void:
 		area.add_child(col)
 		area.position  = handles[handle_id]
 		area.set_meta("handle_id", handle_id)
+		area.add_user_signal("pointer_event")
+		assert(area.has_signal("pointer_event")) #TEMP: remove after passes
+		area.connect("pointer_event", func(event: XRToolsPointerEvent): _on_handle_pointer_event(handle_id, event))
 		root.add_child(area)
 		# connect pointer events to this handle
 		area.input_ray_pickable = true
@@ -288,24 +306,26 @@ func _rebuild_resize_handles() -> void:
 # ── TEMP: mouse testing, delete when testing on headset ──────────────────────
 var _drag_plane := Plane()
 
-# func _input(event: InputEvent) -> void:
-#	if not XRUtils.is_openxr_active():
-#		if event is InputEventMouseButton:
-#			if event.button_index == MOUSE_BUTTON_LEFT:
-#				if event.pressed:
-#					# check resize handles first, then fall back to drag
-#					if not _try_start_mouse_resize(event.position):
-#						_try_start_mouse_drag(event.position)
-#				else:
-#					if _resizing:
-#						stop_resize()
-#					else:
-#						stop_drag()
-#		elif event is InputEventMouseMotion:
-#			if _resizing:
-#				_update_mouse_resize(event.position)
-#			elif _dragging:
-#				_update_mouse_drag(event.position)
+func _input(event: InputEvent) -> void:
+	pass
+	# NOTE: Disabling mouse testing by default for now, since it doesn't work well with xr tools
+	#if not XRUtils.is_openxr_active():
+		#if event is InputEventMouseButton:
+			#if event.button_index == MOUSE_BUTTON_LEFT:
+				#if event.pressed:
+					## check resize handles first, then fall back to drag
+					#if not _try_start_mouse_resize(event.position):
+						#_try_start_mouse_drag(event.position)
+				#else:
+					#if _resizing:
+						#stop_resize()
+					#else:
+						#stop_drag()
+		#elif event is InputEventMouseMotion:
+			#if _resizing:
+				#_update_mouse_resize(event.position)
+			#elif _dragging:
+				#_update_mouse_drag(event.position)
 
 # Check if mouse clicked on a resize handle, returns true if resize started
 func _try_start_mouse_resize(mouse_pos: Vector2) -> bool:
