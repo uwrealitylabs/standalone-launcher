@@ -23,9 +23,9 @@ var base_position: Vector3 = Vector3.ZERO
 var _dragging    := false
 var _drag_offset := Vector3.ZERO
 var _drag_target := Vector3.ZERO
-var world_bounds := AABB(Vector3(-3, 0.5, -3), Vector3(6, 3, 0)) #update as needed
+var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as needed
 var _last_valid_hit := Vector3.ZERO
-@export var follow_speed: float = 15.0
+@export var follow_speed: float = 30.0
 
 # Resize window variables
 var _resizing          := false
@@ -47,14 +47,12 @@ func _ready() -> void:
 
 	var window_header: SWindowHeader = header_3d.get_scene_instance()
 	window_header.close_pressed.connect(close)
-	window_header.drag_started.connect(start_drag)
-	window_header.drag_moved.connect(update_drag)
-	window_header.drag_ended.connect(stop_drag)
 	
 	set_content(content)
 	set_input_enabled(false)
 	
 	header_3d.pointer_event.connect(_on_pointer_event)
+	header_3d.pointer_event.connect(_on_header_pointer_event)
 	content_3d.pointer_event.connect(_on_pointer_event)
 	
 	if not XRUtils.is_openxr_active():
@@ -66,6 +64,19 @@ func _ready() -> void:
 func _on_pointer_event(event: XRToolsPointerEvent):
 	if event.event_type == XRToolsPointerEvent.Type.PRESSED:  # Focus this window when "pressed"
 		focus()
+
+
+func _on_header_pointer_event(event: XRToolsPointerEvent):
+	print(event.position)
+	match event.event_type:
+		XRToolsPointerEvent.Type.PRESSED:
+			start_drag(event.position)
+		XRToolsPointerEvent.Type.MOVED:
+			update_drag(event.position)
+		XRToolsPointerEvent.Type.RELEASED:
+			stop_drag()
+		_:
+			pass
 
 
 ## Send input event to this window
@@ -106,6 +117,7 @@ func set_focused_visual(is_focused: bool) -> void:
 
 # Called when the user grabs the header
 func start_drag(hit_world: Vector3) -> void:
+	print("drag started")
 	_dragging = true
 	_drag_offset = global_position - hit_world
 	_drag_target = global_position
@@ -127,6 +139,7 @@ func _process(delta: float) -> void:
 
 # Called when the user releases controller
 func stop_drag() -> void:
+	print("drag ended")
 	_dragging = false
 	set_process(false)
 
@@ -275,24 +288,24 @@ func _rebuild_resize_handles() -> void:
 # ── TEMP: mouse testing, delete when testing on headset ──────────────────────
 var _drag_plane := Plane()
 
-func _input(event: InputEvent) -> void:
-	if not XRUtils.is_openxr_active():
-		if event is InputEventMouseButton:
-			if event.button_index == MOUSE_BUTTON_LEFT:
-				if event.pressed:
-					# check resize handles first, then fall back to drag
-					if not _try_start_mouse_resize(event.position):
-						_try_start_mouse_drag(event.position)
-				else:
-					if _resizing:
-						stop_resize()
-					else:
-						stop_drag()
-		elif event is InputEventMouseMotion:
-			if _resizing:
-				_update_mouse_resize(event.position)
-			elif _dragging:
-				_update_mouse_drag(event.position)
+# func _input(event: InputEvent) -> void:
+#	if not XRUtils.is_openxr_active():
+#		if event is InputEventMouseButton:
+#			if event.button_index == MOUSE_BUTTON_LEFT:
+#				if event.pressed:
+#					# check resize handles first, then fall back to drag
+#					if not _try_start_mouse_resize(event.position):
+#						_try_start_mouse_drag(event.position)
+#				else:
+#					if _resizing:
+#						stop_resize()
+#					else:
+#						stop_drag()
+#		elif event is InputEventMouseMotion:
+#			if _resizing:
+#				_update_mouse_resize(event.position)
+#			elif _dragging:
+#				_update_mouse_drag(event.position)
 
 # Check if mouse clicked on a resize handle, returns true if resize started
 func _try_start_mouse_resize(mouse_pos: Vector2) -> bool:
