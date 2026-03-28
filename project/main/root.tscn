@@ -1,4 +1,4 @@
-[gd_scene load_steps=23 format=3 uid="uid://bx5my3gah4snb"]
+[gd_scene format=3 uid="uid://bx5my3gah4snb"]
 
 [ext_resource type="Script" uid="uid://bqlkgtmwn4qfr" path="res://project/main/root.gd" id="1_jbgo8"]
 [ext_resource type="PackedScene" uid="uid://d1cjyqd3nylps" path="res://project/xr/xr_player.tscn" id="2_ticcp"]
@@ -84,13 +84,13 @@ nodes/Trigger/node = SubResource("AnimationNodeBlend2_vughs")
 nodes/Trigger/position = Vector2(-360, 40)
 node_connections = [&"output", 0, &"Grip", &"Grip", 0, &"Trigger", &"Grip", 1, &"ClosedHand2", &"Trigger", 0, &"OpenHand", &"Trigger", 1, &"ClosedHand1"]
 
-[node name="Root" type="Node3D"]
+[node name="Root" type="Node3D" unique_id=615219236]
 script = ExtResource("1_jbgo8")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=377909995]
 environment = SubResource("Environment_bf3um")
 
-[node name="XROrigin3D" parent="." instance=ExtResource("2_ticcp")]
+[node name="XROrigin3D" parent="." unique_id=688013842 instance=ExtResource("2_ticcp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2872815, 0)
 
 [node name="XRCamera3D" parent="XROrigin3D" index="0"]
@@ -100,40 +100,40 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.155, 0)
 strafe = false
 enabled = false
 
-[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_left/LeftHand/Hand_Nails_low_L/Armature/Skeleton3D/BoneAttachment3D" index="1"]
+[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_left/LeftHand/Hand_Nails_low_L/Armature/Skeleton3D/BoneAttachment3D" index="1" unique_id=626757880]
 target_position = Vector3(0, 0, -7)
 
-[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_left/LeftHand/Hand_Nails_low_L/Armature/Skeleton3D/BoneAttachment3D" index="2"]
+[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_left/LeftHand/Hand_Nails_low_L/Armature/Skeleton3D/BoneAttachment3D" index="2" unique_id=886051006]
 script = ExtResource("3_5l8kh")
 
 [node name="AnimationTree" parent="XROrigin3D/XRController3D_left/LeftHand" index="1"]
 tree_root = SubResource("AnimationNodeBlendTree_vem7x")
 
-[node name="FunctionPointer" parent="XROrigin3D/XRController3D_left" index="3" instance=ExtResource("4_41lny")]
+[node name="FunctionPointer" parent="XROrigin3D/XRController3D_left" index="3" unique_id=1355944993 instance=ExtResource("4_41lny")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.02, 0.05, -0.1)
 
-[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_right/RightHand/Hand_Nails_low_R/Armature/Skeleton3D/BoneAttachment3D" index="1"]
+[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_right/RightHand/Hand_Nails_low_R/Armature/Skeleton3D/BoneAttachment3D" index="1" unique_id=456072559]
 target_position = Vector3(0, 0, -7)
 collision_mask = 4194304
 
-[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_right/RightHand/Hand_Nails_low_R/Armature/Skeleton3D/BoneAttachment3D" index="2"]
+[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_right/RightHand/Hand_Nails_low_R/Armature/Skeleton3D/BoneAttachment3D" index="2" unique_id=1840012585]
 script = ExtResource("3_5l8kh")
 
 [node name="AnimationTree" parent="XROrigin3D/XRController3D_right/RightHand" index="1"]
 tree_root = SubResource("AnimationNodeBlendTree_amk11")
 
-[node name="FunctionPointer" parent="XROrigin3D/XRController3D_right" index="4" instance=ExtResource("4_41lny")]
+[node name="FunctionPointer" parent="XROrigin3D/XRController3D_right" index="4" unique_id=1783282405 instance=ExtResource("4_41lny")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.02, 0.05, -0.1)
 
 [node name="PlayerBody" parent="XROrigin3D" index="3"]
 collision_layer = 524289
 
-[node name="StartXR" parent="." instance=ExtResource("3_l66go")]
+[node name="StartXR" parent="." unique_id=270042057 instance=ExtResource("3_l66go")]
 
-[node name="Environment" parent="." instance=ExtResource("4_5l8kh")]
+[node name="Environment" parent="." unique_id=1618683723 instance=ExtResource("4_5l8kh")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.68150544, 0)
 
-[node name="WindowManager" parent="." instance=ExtResource("8_41lny")]
+[node name="WindowManager" parent="." unique_id=1805895361 instance=ExtResource("8_41lny")]
 
 [editable path="XROrigin3D"]
 [editable path="XROrigin3D/XRController3D_left/LeftHand"]
