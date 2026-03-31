@@ -54,8 +54,10 @@ func _ready() -> void:
 	header_3d.pointer_event.connect(_on_pointer_event)
 	header_3d.pointer_event.connect(_on_header_pointer_event)
 	content_3d.pointer_event.connect(_on_pointer_event)
+	content_3d.pointer_event.connect(_on_content_pointer_event)
 	
 	if not XRUtils.is_openxr_active():
+		header_3d.enabled = true
 		content_3d.set_process_input(false)
 	_rebuild_resize_handles()
 	
@@ -132,10 +134,16 @@ func update_drag(hit_world: Vector3) -> void:
 	_last_valid_hit = hit_world
 
 func _process(delta: float) -> void:
-	if not _dragging:
+	if not _dragging and not _resizing:
 		return
-	global_position = global_position.lerp(_drag_target, 1.0 - exp(-follow_speed * delta))
-	base_position = global_position
+		
+	if _dragging:
+		global_position = global_position.lerp(_drag_target, 1.0 - exp(-follow_speed * delta))
+		base_position = global_position
+	
+	if _resizing:
+		# Keep base_position so it doesn't snap back after resize
+		base_position = global_position
 
 # Called when the user releases controller
 func stop_drag() -> void:
@@ -257,7 +265,48 @@ func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> 
 		_:
 			pass
 
-# Create the handles for users to grab onto, only show when hovering near
+# Updated resize logic -> detects if the pointer is near an edge and starts resize if so
+func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
+	match event.event_type:
+		XRToolsPointerEvent.Type.PRESSED:
+			var handle = _get_handle_from_world_pos(event.position)
+			if handle != "":
+				# pointer is near an edge — start resize
+				start_resize(handle, event.position)
+		XRToolsPointerEvent.Type.MOVED:
+			if _resizing:
+				update_resize(event.position)
+		XRToolsPointerEvent.Type.RELEASED:
+			if _resizing:
+				stop_resize()
+		_:
+			pass
+
+# figure out which resize handle to use
+func _get_handle_from_world_pos(world_pos: Vector3) -> String:
+	# convert world position to local position relative to content
+	var local = content_3d.to_local(world_pos)
+	var hw := content_size.x / 2.0
+	var hh := content_size.y / 2.0
+	# edge threshold — how close to the edge counts as a resize handle
+	var edge := 0.12
+
+	var on_left   : bool = local.x < -hw + edge
+	var on_right  : bool = local.x >  hw - edge
+	var on_top    : bool = local.y >  hh - edge
+	var on_bottom : bool = local.y < -hh + edge
+
+	if on_top    and on_left:  return "TL"
+	if on_top    and on_right: return "TR"
+	if on_bottom and on_left:  return "BL"
+	if on_bottom and on_right: return "BR"
+	if on_left:                return "L"
+	if on_right:               return "R"
+	if on_top:                 return "T"
+	if on_bottom:              return "B"
+	return ""
+
+# handles for users to grab onto
 func _rebuild_resize_handles() -> void:
 	print("rebuilding resize handles...")
 	# remove old handles first
@@ -295,9 +344,11 @@ func _rebuild_resize_handles() -> void:
 		col.shape  = shape
 		area.add_child(col)
 		area.position  = handles[handle_id]
+		area.collision_layer = 0
 		area.set_meta("handle_id", handle_id)
-		area.add_user_signal("pointer_event")
-		assert(area.has_signal("pointer_event")) #TEMP: remove after passes
+		if not area.has_user_signal("pointer_event"):
+			area.add_user_signal("pointer_event")
+		# assert(area.has_signal("pointer_event")) #TEMP: remove after passes
 		area.connect("pointer_event", func(event: XRToolsPointerEvent): _on_handle_pointer_event(handle_id, event))
 		root.add_child(area)
 		# connect pointer events to this handle
