@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://ccfrhlog00wu1" path="res://project/windowing/swindow.gd" id="1_idmct"]
 [ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="2_5i7x0"]
-[ext_resource type="PackedScene" uid="uid://dolm6lyyt0336" path="res://project/windowing/window_header.tscn" id="2_832o4"]
+[ext_resource type="PackedScene" uid="uid://bre1qha8pkyq6" path="res://project/windowing/window_header.tscn" id="2_832o4"]
 [ext_resource type="PackedScene" uid="uid://dsspyu52mpyhh" path="res://project/windowing/window_placeholder_content.tscn" id="2_hnifa"]
 
 [sub_resource type="QuadMesh" id="QuadMesh_hnifa"]

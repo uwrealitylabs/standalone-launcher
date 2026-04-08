@@ -23,7 +23,7 @@ func create_window(pos: Vector3 = Vector3.ZERO, content: PackedScene = null) -> 
 	win.on_focused.connect(_on_window_focused)
 
 	# new window gets top z-order
-	bring_to_front(win)
+	#bring_to_front(win)
 	
 	if content:
 		win.set_content(content)
