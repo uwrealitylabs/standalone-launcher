@@ -101,15 +101,36 @@ func _process_hit_test():
 
 func _process_tap(pinch_value: float):
 	var is_pinching = pinch_value >= pinch_threshold
+	var hit_pos = _raycast.get_collision_point() if _raycast.is_colliding() else Vector3.ZERO
 
-	# detect rising edge: pinch just started this frame
 	if is_pinching and not _was_pinching:
+		_send_xr_event(XRToolsPointerEvent.Type.PRESSED, hit_pos)
 		if _current_target and _debounce_timer <= 0.0:
-			var hit_pos = _raycast.get_collision_point()
 			pointer_activated.emit(_current_target, hit_pos)
 			_debounce_timer = debounce_time
 
+	# moving the window
+	elif is_pinching and _was_pinching:
+		_send_xr_event(XRToolsPointerEvent.Type.MOVED, hit_pos)
+
+	elif not is_pinching and _was_pinching:
+		_send_xr_event(XRToolsPointerEvent.Type.RELEASED, hit_pos)
+
 	_was_pinching = is_pinching
+
+# bridge function between XRToolsPointerEvent and our custom script
+func _send_xr_event(type: int, pos: Vector3):
+	if not _current_target: return
+	
+	# find the parents Viewport node of a child node
+	var target_node = _current_target
+	if not target_node.has_signal("pointer_event"):
+		if target_node.get_parent() and target_node.get_parent().has_signal("pointer_event"):
+			target_node = target_node.get_parent()
+
+	if target_node.has_signal("pointer_event"):
+		var ev = XRToolsPointerEvent.new(type, target_node, self, pos, Vector3.ZERO)
+		target_node.emit_signal("pointer_event", ev)
 
 
 func _update_visuals():

@@ -1,6 +1,6 @@
 class_name SWindowHeader extends Control
 
-@onready var close_button = $HBoxContainer/CloseButton
+@onready var close_button: Button = $HBoxContainer/CloseButton
 
 signal close_pressed()
 

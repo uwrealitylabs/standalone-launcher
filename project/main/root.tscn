@@ -6,7 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://clc5dre31iskm" path="res://addons/godot-xr-tools/xr/start_xr.tscn" id="3_l66go"]
 [ext_resource type="PackedScene" uid="uid://c2vufctclqcr3" path="res://project/main/environment.tscn" id="4_5l8kh"]
 [ext_resource type="PackedScene" uid="uid://cqhw276realc" path="res://addons/godot-xr-tools/functions/function_pointer.tscn" id="4_41lny"]
-[ext_resource type="PackedScene" uid="uid://cnhkl3h5plg3f" path="res://project/windowing/window_manager.tscn" id="8_41lny"]
+[ext_resource type="PackedScene" uid="uid://c6s5me84muhcj" path="res://project/windowing/window_manager.tscn" id="8_41lny"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_l8v81"]
 sky_top_color = Color(0.7164733, 0.6269366, 0.43380052, 1)

@@ -1,4 +1,4 @@
-[gd_scene load_steps=4 format=3 uid="uid://cnhkl3h5plg3f"]
+[gd_scene load_steps=4 format=3 uid="uid://c6s5me84muhcj"]
 
 [ext_resource type="Script" uid="uid://cnfbvbavwf6q2" path="res://project/windowing/window_manager.gd" id="1_kmgho"]
 [ext_resource type="PackedScene" uid="uid://eposco7r4gm8" path="res://project/windowing/window.tscn" id="2_8jtpn"]
