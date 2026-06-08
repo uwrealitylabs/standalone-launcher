@@ -1,0 +1,16 @@
+[gd_scene format=3 uid="uid://bokekebdjc0p8"]
+
+[ext_resource type="Script" uid="uid://bfs18pys34m87" path="res://native_apps/calculator/calculator.gd" id="1_0s185"]
+[ext_resource type="PackedScene" uid="uid://depddl1urdch2" path="res://keyboard/button/Button.tscn" id="2_k6hry"]
+[ext_resource type="PackedScene" uid="uid://rlum416x2wmn" path="res://native_apps/calculator/Display.tscn" id="3_abevh"]
+
+[node name="Calculator" type="Node3D" unique_id=1057776201]
+script = ExtResource("1_0s185")
+button_scene = ExtResource("2_k6hry")
+
+[node name="Buttons" type="Node3D" parent="." unique_id=587259772]
+
+[node name="Display" parent="." unique_id=192244514 instance=ExtResource("3_abevh")]
+
+[node name="testcamera3D" type="Camera3D" parent="." unique_id=2098886427]
+transform = Transform3D(1, 0, 0, 0, 0.44874194, 0.8936614, 0, -0.8936614, 0.44874194, 0, 0.44807738, 0.14307523)

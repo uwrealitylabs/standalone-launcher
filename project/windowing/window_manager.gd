@@ -82,7 +82,7 @@ func send_to_back(win: SWindow) -> void:
 	_recalculate_z_order()
 
 
-## Move a window one level forward in the stack
+## Move a window one level forward in the stack 
 func move_forward(win: SWindow) -> void:
 	if win not in windows_list:
 		return

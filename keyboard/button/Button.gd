@@ -45,6 +45,12 @@ signal unpressed(key: Key)
 		if get_child_count():
 			$Label.outline_size = $Label.font_size * outline_to_font_ratio
 
+# the token this button inputs
+@export var value: String = "" 
+
+func get_token() -> String:
+	return value if value != "" else custom_label
+
 var is_pressed: bool = false
 
 
