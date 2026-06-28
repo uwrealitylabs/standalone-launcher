@@ -129,7 +129,7 @@ func _send_xr_event(type: int, pos: Vector3):
 			target_node = target_node.get_parent()
 
 	if target_node.has_signal("pointer_event"):
-		var ev = XRToolsPointerEvent.new(type, target_node, self, pos, Vector3.ZERO)
+		var ev = XRToolsPointerEvent.new(type, self, target_node, pos, Vector3.ZERO)
 		target_node.emit_signal("pointer_event", ev)
 
 
