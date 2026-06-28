@@ -119,12 +119,12 @@ func set_focused_visual(is_focused: bool) -> void:
 
 # Called when the user grabs the header
 func start_drag(hit_world: Vector3) -> void:
-	print("drag started")
 	_dragging = true
 	_drag_offset = global_position - hit_world
 	_drag_target = global_position
 	base_position = global_position
 	set_process(true)
+	print("[%s] drag start z=%.3f" % [name, global_position.z])
 
 # Called whenever the pointer moves while dragging
 func update_drag(hit_world: Vector3) -> void:
@@ -132,6 +132,7 @@ func update_drag(hit_world: Vector3) -> void:
 		return
 	_drag_target = _clamp_to_bounds(hit_world + _drag_offset)
 	_last_valid_hit = hit_world
+	print("[%s] drag target z=%.3f" % [name, _drag_target.z])
 
 func _process(delta: float) -> void:
 	if not _dragging and not _resizing:
@@ -147,15 +148,14 @@ func _process(delta: float) -> void:
 
 # Called when the user releases controller
 func stop_drag() -> void:
-	print("drag ended")
 	_dragging = false
 	set_process(false)
+	print("[%s] drag end z=%.3f" % [name, global_position.z])
 
 # Keeps the window within world bounds
 func _clamp_to_bounds(pos: Vector3) -> Vector3:
 	pos.x = clamp(pos.x, world_bounds.position.x, world_bounds.end.x)
 	pos.y = clamp(pos.y, world_bounds.position.y, world_bounds.end.y)
-	pos.z = clamp(pos.z, world_bounds.position.z, world_bounds.end.z)
 	return pos
 
 # Called when user grabs a resize handle
