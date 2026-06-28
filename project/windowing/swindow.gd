@@ -69,7 +69,7 @@ func _on_pointer_event(event: XRToolsPointerEvent):
 
 
 func _on_header_pointer_event(event: XRToolsPointerEvent):
-	print(event.position)
+	# print(event.position)
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
 			start_drag(event.position)
