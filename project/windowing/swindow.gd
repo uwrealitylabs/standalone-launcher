@@ -188,18 +188,9 @@ func update_resize(hit_world: Vector3) -> void:
 	elif _resize_handle == "L":
 		new_size.x -= delta.x
 		pos_shift.x = delta.x / 2.0
-	elif _resize_handle == "T":
-		new_size.y += delta.y
 	elif _resize_handle == "B":
 		new_size.y -= delta.y
 		pos_shift.y = delta.y / 2.0
-	elif _resize_handle == "TR":
-		new_size.x += delta.x
-		new_size.y += delta.y
-	elif _resize_handle == "TL":
-		new_size.x -= delta.x
-		new_size.y += delta.y
-		pos_shift.x = delta.x / 2.0
 	elif _resize_handle == "BR":
 		new_size.x += delta.x
 		new_size.y -= delta.y
@@ -293,16 +284,12 @@ func _get_handle_from_world_pos(world_pos: Vector3) -> String:
 
 	var on_left   : bool = local.x < -hw + edge
 	var on_right  : bool = local.x >  hw - edge
-	var on_top    : bool = local.y >  hh - edge
 	var on_bottom : bool = local.y < -hh + edge
 
-	if on_top    and on_left:  return "TL"
-	if on_top    and on_right: return "TR"
 	if on_bottom and on_left:  return "BL"
 	if on_bottom and on_right: return "BR"
 	if on_left:                return "L"
 	if on_right:               return "R"
-	if on_top:                 return "T"
 	if on_bottom:              return "B"
 	return ""
 
@@ -325,9 +312,6 @@ func _rebuild_resize_handles() -> void:
 
 	# handle id -> local position
 	var handles := {
-		"TL": Vector3(-hw,  hh, 0.01),
-		"T":  Vector3(  0,  hh, 0.01),
-		"TR": Vector3( hw,  hh, 0.01),
 		"L":  Vector3(-hw,   0, 0.01),
 		"R":  Vector3( hw,   0, 0.01),
 		"BL": Vector3(-hw, -hh, 0.01),
