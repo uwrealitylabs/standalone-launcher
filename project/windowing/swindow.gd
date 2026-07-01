@@ -131,17 +131,24 @@ func set_focused_visual(is_focused: bool) -> void:
 
 # Called when the user grabs the header
 func start_drag(hit_world: Vector3) -> void:
+	print("(before focus) [%s] drag start z=%.3f" % [name, global_position.z])
+	# Focus (and any resulting z-order position bump) must complete before
+	# global_position is captured below — otherwise the drag plane can be
+	# frozen at a stale, pre-focus Z. Godot's default (non-deferred) signal
+	# connections make this synchronous, so calling focus() first guarantees
+	# ordering regardless of which path triggered the drag (header press,
+	# content edge-drag, or a resize handle) or how signals were connected.
+	focus()
 	_dragging = true
 	_drag_offset = global_position - hit_world
 	_drag_target = global_position
 	base_position = global_position
-	# Freeze a plane through the grab point, facing the camera. All subsequent
-	# moves are resolved against this fixed plane (not the moving collider), so
-	# the window can't feed its own motion back into the drag and creep forward.
-	var camera := get_viewport().get_camera_3d()
-	if camera:
-		var normal := (camera.global_position - hit_world).normalized()
-		_drag_plane = Plane(normal, hit_world)
+	# Window is always axis-aligned in world XY (see WindowManager — position
+	# is the only transform ever applied to a window), so freeze the drag
+	# plane at the window's own Z through its centre, instead of a
+	# camera-facing plane through the grab point. This keeps every resolved
+	# hit exactly on the window's Z regardless of head orientation.
+	_drag_plane = Plane(Vector3(0, 0, 1), global_position)
 	set_process(true)
 	print("[%s] drag start z=%.3f" % [name, global_position.z])
 
@@ -179,19 +186,24 @@ func _clamp_to_bounds(pos: Vector3) -> Vector3:
 
 # Called when user grabs a resize handle
 func start_resize(handle: String, hit_world: Vector3) -> void:
+	print("(before focus) [%s] resize start z=%.3f" % [name, global_position.z])
+	# Same reasoning as start_drag(): focus first, so the z-order bump (if
+	# any) is applied before global_position is captured. This also fixes
+	# handle-based resize, which previously never focused the window at all
+	# since resize handles emit their own pointer_event signal and were
+	# never wired to the generic focus-on-press handler.
+	focus()
 	_resizing          = true
 	_resize_handle     = handle
 	_resize_start_hit  = to_local(hit_world)
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
-	# Freeze a plane through the grab point, facing the camera. Moves are resolved
-	# against this fixed plane (not the moving collider) so resize can't feed the
-	# window's own motion back into the hit point and run away.
-	var camera = get_viewport().get_camera_3d()
-	if camera:
-		var normal = (camera.global_position - hit_world).normalized()
-		_resize_plane = Plane(normal, hit_world)
+	# Same reasoning as start_drag(): freeze the resize plane at the window's
+	# own Z through its centre rather than a camera-facing plane.
+	_resize_plane = Plane(Vector3(0, 0, 1), global_position)
 	set_process(true)
+	print("[%s] resize start z=%.3f" % [name, global_position.z])
+
 
 # Called every frame while resize handle is held
 func update_resize(hit_world: Vector3) -> void:
@@ -226,6 +238,8 @@ func update_resize(hit_world: Vector3) -> void:
 		global_position = _resize_start_pos + \
 			global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
 	_apply_content_size_mesh_only(clamped)
+	print("[%s] resizing z=%.3f" % [name, global_position.z])
+
 
 # Called when user releases resize handle
 func stop_resize() -> void:
@@ -235,6 +249,8 @@ func stop_resize() -> void:
 	_update_content_viewport_resolution()
 	_rebuild_resize_handles()
 	set_process(false)
+	print("[%s] resize stops z=%.3f" % [name, global_position.z])
+
 
 # Resize only the mesh while dragging — skip expensive viewport update
 func _apply_content_size_mesh_only(new_size: Vector2) -> void:
