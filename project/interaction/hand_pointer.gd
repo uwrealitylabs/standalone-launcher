@@ -151,6 +151,18 @@ func _update_visuals():
 		_cursor_dot.visible = false
 
 
+## World-space origin of the pointing ray.
+## Used by windows to re-intersect the hand ray against a frozen plane while
+## dragging, instead of relying on the moving-collider hit point.
+func get_ray_origin() -> Vector3:
+	return _raycast.global_transform.origin
+
+
+## World-space direction the pointing ray travels (RayCast3D points along -Z).
+func get_ray_direction() -> Vector3:
+	return -_raycast.global_transform.basis.z
+
+
 func _get_controller() -> XRController3D:
 	# walk up the tree to find the XRController3D ancestor
 	var node = get_parent()

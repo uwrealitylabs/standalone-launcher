@@ -23,6 +23,7 @@ var base_position: Vector3 = Vector3.ZERO
 var _dragging    := false
 var _drag_offset := Vector3.ZERO
 var _drag_target := Vector3.ZERO
+var _drag_plane  := Plane()  # frozen at grab time so the window can't drift in depth
 var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as needed
 var _last_valid_hit := Vector3.ZERO
 @export var follow_speed: float = 30.0
@@ -74,11 +75,22 @@ func _on_header_pointer_event(event: XRToolsPointerEvent):
 		XRToolsPointerEvent.Type.PRESSED:
 			start_drag(event.position)
 		XRToolsPointerEvent.Type.MOVED:
-			update_drag(event.position)
+			update_drag(_resolve_pointer_hit(event, _drag_plane))
 		XRToolsPointerEvent.Type.RELEASED:
 			stop_drag()
 		_:
 			pass
+
+
+# Re-intersects the hand's ray against a fixed plane instead of using the
+# moving-collider hit. Falls back to the raw event position if no usable ray
+# (e.g. a code path that isn't driven by HandPointer).
+func _resolve_pointer_hit(event: XRToolsPointerEvent, plane: Plane) -> Vector3:
+	var hand := event.pointer as HandPointer
+	if not hand:
+		return event.position
+	var hit = plane.intersects_ray(hand.get_ray_origin(), hand.get_ray_direction())
+	return hit if hit != null else event.position
 
 
 ## Send input event to this window
@@ -123,6 +135,13 @@ func start_drag(hit_world: Vector3) -> void:
 	_drag_offset = global_position - hit_world
 	_drag_target = global_position
 	base_position = global_position
+	# Freeze a plane through the grab point, facing the camera. All subsequent
+	# moves are resolved against this fixed plane (not the moving collider), so
+	# the window can't feed its own motion back into the drag and creep forward.
+	var camera := get_viewport().get_camera_3d()
+	if camera:
+		var normal := (camera.global_position - hit_world).normalized()
+		_drag_plane = Plane(normal, hit_world)
 	set_process(true)
 	print("[%s] drag start z=%.3f" % [name, global_position.z])
 
@@ -165,11 +184,13 @@ func start_resize(handle: String, hit_world: Vector3) -> void:
 	_resize_start_hit  = to_local(hit_world)
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
-	# create a plane at the window's depth for smooth tracking
+	# Freeze a plane through the grab point, facing the camera. Moves are resolved
+	# against this fixed plane (not the moving collider) so resize can't feed the
+	# window's own motion back into the hit point and run away.
 	var camera = get_viewport().get_camera_3d()
 	if camera:
-		var normal = (camera.global_position - global_position).normalized()
-		_resize_plane = Plane(normal, global_position)
+		var normal = (camera.global_position - hit_world).normalized()
+		_resize_plane = Plane(normal, hit_world)
 	set_process(true)
 
 # Called every frame while resize handle is held
@@ -250,7 +271,7 @@ func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> 
 		XRToolsPointerEvent.Type.PRESSED:
 			start_resize(handle_id, event.position)
 		XRToolsPointerEvent.Type.MOVED:
-			update_resize(event.position)
+			update_resize(_resolve_pointer_hit(event, _resize_plane))
 		XRToolsPointerEvent.Type.RELEASED:
 			stop_resize()
 		_:
@@ -266,7 +287,7 @@ func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
 				start_resize(handle, event.position)
 		XRToolsPointerEvent.Type.MOVED:
 			if _resizing:
-				update_resize(event.position)
+				update_resize(_resolve_pointer_hit(event, _resize_plane))
 		XRToolsPointerEvent.Type.RELEASED:
 			if _resizing:
 				stop_resize()
@@ -339,7 +360,6 @@ func _rebuild_resize_handles() -> void:
 		area.input_ray_pickable = true
 
 # ── TEMP: mouse testing, delete when testing on headset ──────────────────────
-var _drag_plane := Plane()
 
 func _input(event: InputEvent) -> void:
 	pass
