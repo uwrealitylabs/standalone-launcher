@@ -66,7 +66,9 @@ func _ready() -> void:
 ## Invoked when a pointer event on the window is detected
 func _on_pointer_event(event: XRToolsPointerEvent):
 	if event.event_type == XRToolsPointerEvent.Type.PRESSED:  # Focus this window when "pressed"
+		print("(before focus) [%s] z=%.3f" % [name, global_position.z])
 		focus()
+		print("(after focus) [%s] z=%.3f" % [name, global_position.z])
 
 
 func _on_header_pointer_event(event: XRToolsPointerEvent):
@@ -131,7 +133,6 @@ func set_focused_visual(is_focused: bool) -> void:
 
 # Called when the user grabs the header
 func start_drag(hit_world: Vector3) -> void:
-	print("(before focus) [%s] drag start z=%.3f" % [name, global_position.z])
 	# Focus (and any resulting z-order position bump) must complete before
 	# global_position is captured below — otherwise the drag plane can be
 	# frozen at a stale, pre-focus Z. Godot's default (non-deferred) signal
@@ -158,7 +159,6 @@ func update_drag(hit_world: Vector3) -> void:
 		return
 	_drag_target = _clamp_to_bounds(hit_world + _drag_offset)
 	_last_valid_hit = hit_world
-	print("[%s] drag target z=%.3f" % [name, _drag_target.z])
 
 func _process(delta: float) -> void:
 	if not _dragging and not _resizing:
@@ -186,7 +186,6 @@ func _clamp_to_bounds(pos: Vector3) -> Vector3:
 
 # Called when user grabs a resize handle
 func start_resize(handle: String, hit_world: Vector3) -> void:
-	print("(before focus) [%s] resize start z=%.3f" % [name, global_position.z])
 	# Same reasoning as start_drag(): focus first, so the z-order bump (if
 	# any) is applied before global_position is captured. This also fixes
 	# handle-based resize, which previously never focused the window at all
@@ -238,7 +237,6 @@ func update_resize(hit_world: Vector3) -> void:
 		global_position = _resize_start_pos + \
 			global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
 	_apply_content_size_mesh_only(clamped)
-	print("[%s] resizing z=%.3f" % [name, global_position.z])
 
 
 # Called when user releases resize handle
