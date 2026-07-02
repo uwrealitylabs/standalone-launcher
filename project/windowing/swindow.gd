@@ -117,9 +117,16 @@ func set_input_enabled(enabled: bool) -> void:
 	content_3d.input_gamepad = enabled
 
 ## Updates the window's position based on its z-order
-func apply_z_order() -> void:                                                                                    ##67 :)
+func apply_z_order() -> void:
 	# move the window forward (toward the user) based on z_order
-	position = base_position + Vector3(0, 0, z_order * Z_STEP)
+	position = base_position + _z_order_offset()
+
+
+## Depth offset stacked on top of base_position for this window's z-order.
+## base_position must never itself include this offset (see start_drag/_process),
+## or apply_z_order() double-counts it and the window creeps toward the camera.
+func _z_order_offset() -> Vector3:
+	return Vector3(0, 0, z_order * Z_STEP)
 
 ## Visual feedback when the current window becomes the focused window
 func set_focused_visual(is_focused: bool) -> void:
@@ -142,8 +149,14 @@ func start_drag(hit_world: Vector3) -> void:
 	focus()
 	_dragging = true
 	_drag_offset = global_position - hit_world
+	# Depth is owned by z-order, not the hand: zero the offset's Z so the drag
+	# only translates in X/Y on the frozen plane. This also drops the ~1cm
+	# header-collider offset that would otherwise leak into the target's depth.
+	_drag_offset.z = 0.0
 	_drag_target = global_position
-	base_position = global_position
+	# base_position must exclude the z-order offset that focus() just applied,
+	# else apply_z_order() adds it a second time and creeps the window forward.
+	base_position = global_position - _z_order_offset()
 	# Window is always axis-aligned in world XY (see WindowManager — position
 	# is the only transform ever applied to a window), so freeze the drag
 	# plane at the window's own Z through its centre, instead of a
@@ -166,11 +179,13 @@ func _process(delta: float) -> void:
 		
 	if _dragging:
 		global_position = global_position.lerp(_drag_target, 1.0 - exp(-follow_speed * delta))
-		base_position = global_position
-	
+		# Store base without the z-order offset (see start_drag / apply_z_order).
+		base_position = global_position - _z_order_offset()
+
 	if _resizing:
-		# Keep base_position so it doesn't snap back after resize
-		base_position = global_position
+		# Keep base_position so it doesn't snap back after resize, minus the
+		# z-order offset so apply_z_order() doesn't double-count it.
+		base_position = global_position - _z_order_offset()
 
 # Called when the user releases controller
 func stop_drag() -> void:
@@ -330,7 +345,6 @@ func _get_handle_from_world_pos(world_pos: Vector3) -> String:
 
 # handles for users to grab onto
 func _rebuild_resize_handles() -> void:
-	print("rebuilding resize handles...")
 	# remove old handles first
 	var old = get_node_or_null("ResizeHandles")
 	if old:
@@ -355,7 +369,6 @@ func _rebuild_resize_handles() -> void:
 	}
 
 	for handle_id in handles:
-		print("adding handle " + handle_id)
 		var area  = Area3D.new()
 		var col   = CollisionShape3D.new()
 		var shape = BoxShape3D.new()
