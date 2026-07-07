@@ -66,9 +66,9 @@ func _ready() -> void:
 ## Invoked when a pointer event on the window is detected
 func _on_pointer_event(event: XRToolsPointerEvent):
 	if event.event_type == XRToolsPointerEvent.Type.PRESSED:  # Focus this window when "pressed"
-		print("(before focus) [%s] z=%.3f" % [name, global_position.z])
+		# print("(before focus) [%s] z=%.3f" % [name, global_position.z])
 		focus()
-		print("(after focus) [%s] z=%.3f" % [name, global_position.z])
+		# print("(after focus) [%s] z=%.3f" % [name, global_position.z])
 
 
 func _on_header_pointer_event(event: XRToolsPointerEvent):
