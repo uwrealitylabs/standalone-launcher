@@ -23,6 +23,7 @@ var base_position: Vector3 = Vector3.ZERO
 var _dragging    := false
 var _drag_offset := Vector3.ZERO
 var _drag_target := Vector3.ZERO
+var _drag_plane  := Plane()  # frozen at grab time so the window can't drift in depth
 var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as needed
 var _last_valid_hit := Vector3.ZERO
 @export var follow_speed: float = 30.0
@@ -65,20 +66,32 @@ func _ready() -> void:
 ## Invoked when a pointer event on the window is detected
 func _on_pointer_event(event: XRToolsPointerEvent):
 	if event.event_type == XRToolsPointerEvent.Type.PRESSED:  # Focus this window when "pressed"
+		# print("(before focus) [%s] z=%.3f" % [name, global_position.z])
 		focus()
+		# print("(after focus) [%s] z=%.3f" % [name, global_position.z])
 
 
 func _on_header_pointer_event(event: XRToolsPointerEvent):
-	print(event.position)
+	# print(event.position)
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
 			start_drag(event.position)
 		XRToolsPointerEvent.Type.MOVED:
-			update_drag(event.position)
+			update_drag(_resolve_pointer_hit(event, _drag_plane))
 		XRToolsPointerEvent.Type.RELEASED:
 			stop_drag()
 		_:
 			pass
+
+
+## Re-intersects the hand's ray against fixed plane. 
+## Falls back to the raw event position if no usable ray
+func _resolve_pointer_hit(event: XRToolsPointerEvent, plane: Plane) -> Vector3:
+	var hand := event.pointer as HandPointer
+	if not hand:
+		return event.position
+	var hit = plane.intersects_ray(hand.get_ray_origin(), hand.get_ray_direction())
+	return hit if hit != null else event.position
 
 
 ## Send input event to this window
@@ -92,7 +105,7 @@ func set_content(new_content: PackedScene) -> void:
 	content = new_content
 
 
-## Call this to tell the window manager to bring this window to front
+## Sets this window as focused
 func focus() -> void:
 	on_focused.emit(self)
 	
@@ -103,9 +116,14 @@ func set_input_enabled(enabled: bool) -> void:
 	content_3d.input_gamepad = enabled
 
 ## Updates the window's position based on its z-order
-func apply_z_order() -> void:                                                                                    ##67 :)
+func apply_z_order() -> void:
 	# move the window forward (toward the user) based on z_order
-	position = base_position + Vector3(0, 0, z_order * Z_STEP)
+	position = base_position + _z_order_offset()
+
+
+## Depth offset stacked on top of base_position for this window's z-order.
+func _z_order_offset() -> Vector3:
+	return Vector3(0, 0, z_order * Z_STEP)
 
 ## Visual feedback when the current window becomes the focused window
 func set_focused_visual(is_focused: bool) -> void:
@@ -117,16 +135,23 @@ func set_focused_visual(is_focused: bool) -> void:
 	else:
 		mat.albedo_color = Color(0.6, 0.6, 0.6, 1.0)
 
-# Called when the user grabs the header
+## Retrieves the plane aligned with the window
+func _get_plane() -> Plane:
+	return Plane(Vector3(0, 0, 1), global_position)  # NOTE: Assumes window XY-axis-aligned
+
+## Called when the user grabs the header
 func start_drag(hit_world: Vector3) -> void:
-	print("drag started")
+	focus()
 	_dragging = true
 	_drag_offset = global_position - hit_world
+	_drag_offset.z = 0.0
 	_drag_target = global_position
-	base_position = global_position
+	base_position = global_position - _z_order_offset()
+	_drag_plane = _get_plane()
 	set_process(true)
+	print("[%s] drag start z=%.3f" % [name, global_position.z])
 
-# Called whenever the pointer moves while dragging
+## Called whenever the pointer moves while dragging
 func update_drag(hit_world: Vector3) -> void:
 	if not _dragging:
 		return
@@ -139,40 +164,40 @@ func _process(delta: float) -> void:
 		
 	if _dragging:
 		global_position = global_position.lerp(_drag_target, 1.0 - exp(-follow_speed * delta))
-		base_position = global_position
-	
+		# Store base without the z-order offset (see start_drag / apply_z_order).
+		base_position = global_position - _z_order_offset()
+
 	if _resizing:
-		# Keep base_position so it doesn't snap back after resize
-		base_position = global_position
+		# Keep base_position so it doesn't snap back after resize, minus the
+		# z-order offset so apply_z_order() doesn't double-count it.
+		base_position = global_position - _z_order_offset()
 
 # Called when the user releases controller
 func stop_drag() -> void:
-	print("drag ended")
 	_dragging = false
 	set_process(false)
+	print("[%s] drag end z=%.3f" % [name, global_position.z])
 
-# Keeps the window within world bounds
+## Keeps the window within world bounds
 func _clamp_to_bounds(pos: Vector3) -> Vector3:
 	pos.x = clamp(pos.x, world_bounds.position.x, world_bounds.end.x)
 	pos.y = clamp(pos.y, world_bounds.position.y, world_bounds.end.y)
-	pos.z = clamp(pos.z, world_bounds.position.z, world_bounds.end.z)
 	return pos
 
-# Called when user grabs a resize handle
+## Called when user grabs a resize handle
 func start_resize(handle: String, hit_world: Vector3) -> void:
+	focus()
 	_resizing          = true
 	_resize_handle     = handle
 	_resize_start_hit  = to_local(hit_world)
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
-	# create a plane at the window's depth for smooth tracking
-	var camera = get_viewport().get_camera_3d()
-	if camera:
-		var normal = (camera.global_position - global_position).normalized()
-		_resize_plane = Plane(normal, global_position)
+	_resize_plane = _get_plane()
 	set_process(true)
+	print("[%s] resize start z=%.3f" % [name, global_position.z])
 
-# Called every frame while resize handle is held
+
+## Called every frame while resize handle is held
 func update_resize(hit_world: Vector3) -> void:
 	if not _resizing:
 		return
@@ -188,18 +213,9 @@ func update_resize(hit_world: Vector3) -> void:
 	elif _resize_handle == "L":
 		new_size.x -= delta.x
 		pos_shift.x = delta.x / 2.0
-	elif _resize_handle == "T":
-		new_size.y += delta.y
 	elif _resize_handle == "B":
 		new_size.y -= delta.y
 		pos_shift.y = delta.y / 2.0
-	elif _resize_handle == "TR":
-		new_size.x += delta.x
-		new_size.y += delta.y
-	elif _resize_handle == "TL":
-		new_size.x -= delta.x
-		new_size.y += delta.y
-		pos_shift.x = delta.x / 2.0
 	elif _resize_handle == "BR":
 		new_size.x += delta.x
 		new_size.y -= delta.y
@@ -215,16 +231,19 @@ func update_resize(hit_world: Vector3) -> void:
 			global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
 	_apply_content_size_mesh_only(clamped)
 
-# Called when user releases resize handle
+
+## Called when user releases resize handle
 func stop_resize() -> void:
 	_resizing      = false
 	_resize_handle = ""
-	# only update viewport resolution when done — expensive operation
+	# only update viewport resolution when done - expensive operation
 	_update_content_viewport_resolution()
 	_rebuild_resize_handles()
 	set_process(false)
+	print("[%s] resize stops z=%.3f" % [name, global_position.z])
 
-# Resize only the mesh while dragging — skip expensive viewport update
+
+## Resize the content mesh without updating viewport
 func _apply_content_size_mesh_only(new_size: Vector2) -> void:
 	content_size = new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
 	var content_mesh := content_3d.get_node("Screen") as MeshInstance3D
@@ -233,7 +252,7 @@ func _apply_content_size_mesh_only(new_size: Vector2) -> void:
 	# reposition header to sit on top of content
 	_reposition_header()
 
-# Update the SubViewport resolution to match new size — only call when resize is done
+## Update content viewport resolution to match content mesh size
 func _update_content_viewport_resolution() -> void:
 	var viewport := content_3d.get_node("Viewport") as SubViewport
 	if viewport:
@@ -241,31 +260,30 @@ func _update_content_viewport_resolution() -> void:
 			int(content_size.x * PIXELS_PER_UNIT),
 			int(content_size.y * PIXELS_PER_UNIT)
 		)
-	# also update collision shape
 	var col := content_3d.get_node("StaticBody3D/CollisionShape3D") as CollisionShape3D
 	if col and col.shape is BoxShape3D:
 		(col.shape as BoxShape3D).size = Vector3(content_size.x, content_size.y, 0.02)
 
-# Keeps the header sitting on top of the content area
+## Keeps the header sitting on top of the content area
 func _reposition_header() -> void:
 	var header_node := get_node("Header") as Node3D
 	if header_node:
 		header_node.position.y = (content_size.y / 2.0) + (HEADER_HEIGHT / 2.0)
 
 
-# Invoked when a resize handle's pointer event signal is received
+## Invoked when a resize handle's pointer event signal is received
 func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> void:
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
 			start_resize(handle_id, event.position)
 		XRToolsPointerEvent.Type.MOVED:
-			update_resize(event.position)
+			update_resize(_resolve_pointer_hit(event, _resize_plane))
 		XRToolsPointerEvent.Type.RELEASED:
 			stop_resize()
 		_:
 			pass
 
-# Updated resize logic -> detects if the pointer is near an edge and starts resize if so
+## Invoked on content pointer event
 func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
@@ -275,14 +293,14 @@ func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
 				start_resize(handle, event.position)
 		XRToolsPointerEvent.Type.MOVED:
 			if _resizing:
-				update_resize(event.position)
+				update_resize(_resolve_pointer_hit(event, _resize_plane))
 		XRToolsPointerEvent.Type.RELEASED:
 			if _resizing:
 				stop_resize()
 		_:
 			pass
 
-# figure out which resize handle to use
+## Determines resize handle from pointer world position
 func _get_handle_from_world_pos(world_pos: Vector3) -> String:
 	# convert world position to local position relative to content
 	var local = content_3d.to_local(world_pos)
@@ -293,22 +311,17 @@ func _get_handle_from_world_pos(world_pos: Vector3) -> String:
 
 	var on_left   : bool = local.x < -hw + edge
 	var on_right  : bool = local.x >  hw - edge
-	var on_top    : bool = local.y >  hh - edge
 	var on_bottom : bool = local.y < -hh + edge
 
-	if on_top    and on_left:  return "TL"
-	if on_top    and on_right: return "TR"
 	if on_bottom and on_left:  return "BL"
 	if on_bottom and on_right: return "BR"
 	if on_left:                return "L"
 	if on_right:               return "R"
-	if on_top:                 return "T"
 	if on_bottom:              return "B"
 	return ""
 
-# handles for users to grab onto
+
 func _rebuild_resize_handles() -> void:
-	print("rebuilding resize handles...")
 	# remove old handles first
 	var old = get_node_or_null("ResizeHandles")
 	if old:
@@ -325,9 +338,6 @@ func _rebuild_resize_handles() -> void:
 
 	# handle id -> local position
 	var handles := {
-		"TL": Vector3(-hw,  hh, 0.01),
-		"T":  Vector3(  0,  hh, 0.01),
-		"TR": Vector3( hw,  hh, 0.01),
 		"L":  Vector3(-hw,   0, 0.01),
 		"R":  Vector3( hw,   0, 0.01),
 		"BL": Vector3(-hw, -hh, 0.01),
@@ -336,7 +346,6 @@ func _rebuild_resize_handles() -> void:
 	}
 
 	for handle_id in handles:
-		print("adding handle " + handle_id)
 		var area  = Area3D.new()
 		var col   = CollisionShape3D.new()
 		var shape = BoxShape3D.new()
@@ -355,7 +364,6 @@ func _rebuild_resize_handles() -> void:
 		area.input_ray_pickable = true
 
 # ── TEMP: mouse testing, delete when testing on headset ──────────────────────
-var _drag_plane := Plane()
 
 func _input(event: InputEvent) -> void:
 	pass

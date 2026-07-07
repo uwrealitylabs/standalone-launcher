@@ -18,3 +18,6 @@ mono_crash.*.json
 
 # Project-specific ignores
 build/
+
+# Coding agent instructions
+CLAUDE.md

@@ -24,7 +24,6 @@ var _cursor_dot: MeshInstance3D = null
 
 
 func _ready():
-	# find the RayCast3D sibling (the one you added in step 1)
 	_raycast = get_parent().get_node_or_null("RayCast3D")
 	if not _raycast:
 		push_warning("HandPointer: No RayCast3D sibling found")
@@ -118,7 +117,6 @@ func _process_tap(pinch_value: float):
 
 	_was_pinching = is_pinching
 
-# bridge function between XRToolsPointerEvent and our custom script
 func _send_xr_event(type: int, pos: Vector3):
 	if not _current_target: return
 	
@@ -129,7 +127,7 @@ func _send_xr_event(type: int, pos: Vector3):
 			target_node = target_node.get_parent()
 
 	if target_node.has_signal("pointer_event"):
-		var ev = XRToolsPointerEvent.new(type, target_node, self, pos, Vector3.ZERO)
+		var ev = XRToolsPointerEvent.new(type, self, target_node, pos, Vector3.ZERO)
 		target_node.emit_signal("pointer_event", ev)
 
 
@@ -149,6 +147,16 @@ func _update_visuals():
 	else:
 		_ray_mesh.visible = false
 		_cursor_dot.visible = false
+
+
+## World-space origin of the pointing ray.
+func get_ray_origin() -> Vector3:
+	return _raycast.global_transform.origin
+
+
+## World-space direction the pointing ray travels (RayCast3D points along -Z).
+func get_ray_direction() -> Vector3:
+	return -_raycast.global_transform.basis.z
 
 
 func _get_controller() -> XRController3D:
