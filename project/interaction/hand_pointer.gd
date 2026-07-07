@@ -24,7 +24,6 @@ var _cursor_dot: MeshInstance3D = null
 
 
 func _ready():
-	# find the RayCast3D sibling (the one you added in step 1)
 	_raycast = get_parent().get_node_or_null("RayCast3D")
 	if not _raycast:
 		push_warning("HandPointer: No RayCast3D sibling found")
@@ -118,7 +117,6 @@ func _process_tap(pinch_value: float):
 
 	_was_pinching = is_pinching
 
-# bridge function between XRToolsPointerEvent and our custom script
 func _send_xr_event(type: int, pos: Vector3):
 	if not _current_target: return
 	
@@ -152,8 +150,6 @@ func _update_visuals():
 
 
 ## World-space origin of the pointing ray.
-## Used by windows to re-intersect the hand ray against a frozen plane while
-## dragging, instead of relying on the moving-collider hit point.
 func get_ray_origin() -> Vector3:
 	return _raycast.global_transform.origin
 

@@ -84,9 +84,8 @@ func _on_header_pointer_event(event: XRToolsPointerEvent):
 			pass
 
 
-# Re-intersects the hand's ray against a fixed plane instead of using the
-# moving-collider hit. Falls back to the raw event position if no usable ray
-# (e.g. a code path that isn't driven by HandPointer).
+## Re-intersects the hand's ray against fixed plane. 
+## Falls back to the raw event position if no usable ray
 func _resolve_pointer_hit(event: XRToolsPointerEvent, plane: Plane) -> Vector3:
 	var hand := event.pointer as HandPointer
 	if not hand:
@@ -106,7 +105,7 @@ func set_content(new_content: PackedScene) -> void:
 	content = new_content
 
 
-## Call this to tell the window manager to bring this window to front
+## Sets this window as focused
 func focus() -> void:
 	on_focused.emit(self)
 	
@@ -123,8 +122,6 @@ func apply_z_order() -> void:
 
 
 ## Depth offset stacked on top of base_position for this window's z-order.
-## base_position must never itself include this offset (see start_drag/_process),
-## or apply_z_order() double-counts it and the window creeps toward the camera.
 func _z_order_offset() -> Vector3:
 	return Vector3(0, 0, z_order * Z_STEP)
 
@@ -138,35 +135,23 @@ func set_focused_visual(is_focused: bool) -> void:
 	else:
 		mat.albedo_color = Color(0.6, 0.6, 0.6, 1.0)
 
-# Called when the user grabs the header
+## Retrieves the plane aligned with the window
+func _get_plane() -> Plane:
+	return Plane(Vector3(0, 0, 1), global_position)  # NOTE: Assumes window XY-axis-aligned
+
+## Called when the user grabs the header
 func start_drag(hit_world: Vector3) -> void:
-	# Focus (and any resulting z-order position bump) must complete before
-	# global_position is captured below — otherwise the drag plane can be
-	# frozen at a stale, pre-focus Z. Godot's default (non-deferred) signal
-	# connections make this synchronous, so calling focus() first guarantees
-	# ordering regardless of which path triggered the drag (header press,
-	# content edge-drag, or a resize handle) or how signals were connected.
 	focus()
 	_dragging = true
 	_drag_offset = global_position - hit_world
-	# Depth is owned by z-order, not the hand: zero the offset's Z so the drag
-	# only translates in X/Y on the frozen plane. This also drops the ~1cm
-	# header-collider offset that would otherwise leak into the target's depth.
 	_drag_offset.z = 0.0
 	_drag_target = global_position
-	# base_position must exclude the z-order offset that focus() just applied,
-	# else apply_z_order() adds it a second time and creeps the window forward.
 	base_position = global_position - _z_order_offset()
-	# Window is always axis-aligned in world XY (see WindowManager — position
-	# is the only transform ever applied to a window), so freeze the drag
-	# plane at the window's own Z through its centre, instead of a
-	# camera-facing plane through the grab point. This keeps every resolved
-	# hit exactly on the window's Z regardless of head orientation.
-	_drag_plane = Plane(Vector3(0, 0, 1), global_position)
+	_drag_plane = _get_plane()
 	set_process(true)
 	print("[%s] drag start z=%.3f" % [name, global_position.z])
 
-# Called whenever the pointer moves while dragging
+## Called whenever the pointer moves while dragging
 func update_drag(hit_world: Vector3) -> void:
 	if not _dragging:
 		return
@@ -193,33 +178,26 @@ func stop_drag() -> void:
 	set_process(false)
 	print("[%s] drag end z=%.3f" % [name, global_position.z])
 
-# Keeps the window within world bounds
+## Keeps the window within world bounds
 func _clamp_to_bounds(pos: Vector3) -> Vector3:
 	pos.x = clamp(pos.x, world_bounds.position.x, world_bounds.end.x)
 	pos.y = clamp(pos.y, world_bounds.position.y, world_bounds.end.y)
 	return pos
 
-# Called when user grabs a resize handle
+## Called when user grabs a resize handle
 func start_resize(handle: String, hit_world: Vector3) -> void:
-	# Same reasoning as start_drag(): focus first, so the z-order bump (if
-	# any) is applied before global_position is captured. This also fixes
-	# handle-based resize, which previously never focused the window at all
-	# since resize handles emit their own pointer_event signal and were
-	# never wired to the generic focus-on-press handler.
 	focus()
 	_resizing          = true
 	_resize_handle     = handle
 	_resize_start_hit  = to_local(hit_world)
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
-	# Same reasoning as start_drag(): freeze the resize plane at the window's
-	# own Z through its centre rather than a camera-facing plane.
-	_resize_plane = Plane(Vector3(0, 0, 1), global_position)
+	_resize_plane = _get_plane()
 	set_process(true)
 	print("[%s] resize start z=%.3f" % [name, global_position.z])
 
 
-# Called every frame while resize handle is held
+## Called every frame while resize handle is held
 func update_resize(hit_world: Vector3) -> void:
 	if not _resizing:
 		return
@@ -254,18 +232,18 @@ func update_resize(hit_world: Vector3) -> void:
 	_apply_content_size_mesh_only(clamped)
 
 
-# Called when user releases resize handle
+## Called when user releases resize handle
 func stop_resize() -> void:
 	_resizing      = false
 	_resize_handle = ""
-	# only update viewport resolution when done — expensive operation
+	# only update viewport resolution when done - expensive operation
 	_update_content_viewport_resolution()
 	_rebuild_resize_handles()
 	set_process(false)
 	print("[%s] resize stops z=%.3f" % [name, global_position.z])
 
 
-# Resize only the mesh while dragging — skip expensive viewport update
+## Resize the content mesh without updating viewport
 func _apply_content_size_mesh_only(new_size: Vector2) -> void:
 	content_size = new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
 	var content_mesh := content_3d.get_node("Screen") as MeshInstance3D
@@ -274,7 +252,7 @@ func _apply_content_size_mesh_only(new_size: Vector2) -> void:
 	# reposition header to sit on top of content
 	_reposition_header()
 
-# Update the SubViewport resolution to match new size — only call when resize is done
+## Update content viewport resolution to match content mesh size
 func _update_content_viewport_resolution() -> void:
 	var viewport := content_3d.get_node("Viewport") as SubViewport
 	if viewport:
@@ -282,19 +260,18 @@ func _update_content_viewport_resolution() -> void:
 			int(content_size.x * PIXELS_PER_UNIT),
 			int(content_size.y * PIXELS_PER_UNIT)
 		)
-	# also update collision shape
 	var col := content_3d.get_node("StaticBody3D/CollisionShape3D") as CollisionShape3D
 	if col and col.shape is BoxShape3D:
 		(col.shape as BoxShape3D).size = Vector3(content_size.x, content_size.y, 0.02)
 
-# Keeps the header sitting on top of the content area
+## Keeps the header sitting on top of the content area
 func _reposition_header() -> void:
 	var header_node := get_node("Header") as Node3D
 	if header_node:
 		header_node.position.y = (content_size.y / 2.0) + (HEADER_HEIGHT / 2.0)
 
 
-# Invoked when a resize handle's pointer event signal is received
+## Invoked when a resize handle's pointer event signal is received
 func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> void:
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
@@ -306,7 +283,7 @@ func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> 
 		_:
 			pass
 
-# Updated resize logic -> detects if the pointer is near an edge and starts resize if so
+## Invoked on content pointer event
 func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
@@ -323,7 +300,7 @@ func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
 		_:
 			pass
 
-# figure out which resize handle to use
+## Determines resize handle from pointer world position
 func _get_handle_from_world_pos(world_pos: Vector3) -> String:
 	# convert world position to local position relative to content
 	var local = content_3d.to_local(world_pos)
@@ -343,7 +320,7 @@ func _get_handle_from_world_pos(world_pos: Vector3) -> String:
 	if on_bottom:              return "B"
 	return ""
 
-# handles for users to grab onto
+
 func _rebuild_resize_handles() -> void:
 	# remove old handles first
 	var old = get_node_or_null("ResizeHandles")
