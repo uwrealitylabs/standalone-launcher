@@ -16,7 +16,12 @@ var z_order: int = 0
 ## The depth offset per z-order level (in meters)
 const Z_STEP: float = 0.05
 
-## Base position before z-order offset is applied
+## Shared depth baseline for z-order level 0 (in meters).
+## World z is always LAYER_ORIGIN_Z + z_order * Z_STEP — never derived from
+## positions — so depth cannot drift off the Z_STEP grid.
+const LAYER_ORIGIN_Z: float = -2.0
+
+## Base XY position; z always comes from z_order (see apply_z_order)
 var base_position: Vector3 = Vector3.ZERO
 
 # Drag state variables
@@ -25,7 +30,6 @@ var _drag_offset := Vector3.ZERO
 var _drag_target := Vector3.ZERO
 var _drag_plane  := Plane()  # frozen at grab time so the window can't drift in depth
 var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as needed
-var _last_valid_hit := Vector3.ZERO
 @export var follow_speed: float = 30.0
 
 # Resize window variables
@@ -43,6 +47,9 @@ const MIN_CONTENT_SIZE := Vector2(0.4, 0.2)
 const MAX_CONTENT_SIZE := Vector2(3.0, 2.5)
 const PIXELS_PER_UNIT : float = 150.0
 
+# NOTE: Gesture code uses global_position while apply_z_order sets local
+# position — equivalent only while the WindowManager sits at the world origin,
+# unrotated and unscaled.
 func _ready() -> void:
 	base_position = position
 
@@ -72,26 +79,29 @@ func _on_pointer_event(event: XRToolsPointerEvent):
 
 
 func _on_header_pointer_event(event: XRToolsPointerEvent):
-	# print(event.position)
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
 			start_drag(event.position)
 		XRToolsPointerEvent.Type.MOVED:
-			update_drag(_resolve_pointer_hit(event, _drag_plane))
+			var hit = _resolve_pointer_hit(event, _drag_plane)
+			if hit != null:
+				update_drag(hit)
 		XRToolsPointerEvent.Type.RELEASED:
 			stop_drag()
 		_:
 			pass
 
 
-## Re-intersects the hand's ray against fixed plane. 
-## Falls back to the raw event position if no usable ray
-func _resolve_pointer_hit(event: XRToolsPointerEvent, plane: Plane) -> Vector3:
+## Re-intersects the pointer ray against the frozen gesture plane.
+## Returns the on-plane hit as a Vector3, or null when the ray misses the
+## plane this frame (caller should skip the frame). Compare with `!= null`,
+## not truthiness — Vector3.ZERO is falsy.
+func _resolve_pointer_hit(event: XRToolsPointerEvent, plane: Plane) -> Variant:
 	var hand := event.pointer as HandPointer
 	if not hand:
-		return event.position
-	var hit = plane.intersects_ray(hand.get_ray_origin(), hand.get_ray_direction())
-	return hit if hit != null else event.position
+		# Non-hand pointers (e.g. simulator): keep XY, snap depth to the plane
+		return plane.project(event.position)
+	return plane.intersects_ray(hand.get_ray_origin(), hand.get_ray_direction())
 
 
 ## Send input event to this window
@@ -117,13 +127,12 @@ func set_input_enabled(enabled: bool) -> void:
 
 ## Updates the window's position based on its z-order
 func apply_z_order() -> void:
-	# move the window forward (toward the user) based on z_order
-	position = base_position + _z_order_offset()
-
-
-## Depth offset stacked on top of base_position for this window's z-order.
-func _z_order_offset() -> Vector3:
-	return Vector3(0, 0, z_order * Z_STEP)
+	# depth comes exclusively from z_order; base_position only contributes XY
+	position = Vector3(
+		base_position.x,
+		base_position.y,
+		LAYER_ORIGIN_Z + z_order * Z_STEP
+	)
 
 ## Visual feedback when the current window becomes the focused window
 func set_focused_visual(is_focused: bool) -> void:
@@ -146,7 +155,6 @@ func start_drag(hit_world: Vector3) -> void:
 	_drag_offset = global_position - hit_world
 	_drag_offset.z = 0.0
 	_drag_target = global_position
-	base_position = global_position - _z_order_offset()
 	_drag_plane = _get_plane()
 	set_process(true)
 	print("[%s] drag start z=%.3f" % [name, global_position.z])
@@ -156,21 +164,18 @@ func update_drag(hit_world: Vector3) -> void:
 	if not _dragging:
 		return
 	_drag_target = _clamp_to_bounds(hit_world + _drag_offset)
-	_last_valid_hit = hit_world
 
 func _process(delta: float) -> void:
-	if not _dragging and not _resizing:
+	if not _dragging:
 		return
-		
-	if _dragging:
-		global_position = global_position.lerp(_drag_target, 1.0 - exp(-follow_speed * delta))
-		# Store base without the z-order offset (see start_drag / apply_z_order).
-		base_position = global_position - _z_order_offset()
 
-	if _resizing:
-		# Keep base_position so it doesn't snap back after resize, minus the
-		# z-order offset so apply_z_order() doesn't double-count it.
-		base_position = global_position - _z_order_offset()
+	# Drag moves the window in XY only; z stays owned by z_order so a mid-drag
+	# stack change (focus, window close) can't pull depth off the grid.
+	var next := global_position.lerp(_drag_target, 1.0 - exp(-follow_speed * delta))
+	global_position.x = next.x
+	global_position.y = next.y
+	base_position.x = global_position.x
+	base_position.y = global_position.y
 
 # Called when the user releases controller
 func stop_drag() -> void:
@@ -193,7 +198,6 @@ func start_resize(handle: String, hit_world: Vector3) -> void:
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
 	_resize_plane = _get_plane()
-	set_process(true)
 	print("[%s] resize start z=%.3f" % [name, global_position.z])
 
 
@@ -227,8 +231,15 @@ func update_resize(hit_world: Vector3) -> void:
 
 	var clamped := new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
 	if clamped.is_equal_approx(new_size):
-		global_position = _resize_start_pos + \
+		# Apply the shift in XY only; z stays owned by z_order so a stale
+		# _resize_start_pos.z can't leak back in after a mid-resize stack change.
+		# NOTE: Assumes window is unrotated (basis maps XY shift to world XY).
+		var shifted := _resize_start_pos + \
 			global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
+		global_position.x = shifted.x
+		global_position.y = shifted.y
+		base_position.x = global_position.x
+		base_position.y = global_position.y
 	_apply_content_size_mesh_only(clamped)
 
 
@@ -239,7 +250,6 @@ func stop_resize() -> void:
 	# only update viewport resolution when done - expensive operation
 	_update_content_viewport_resolution()
 	_rebuild_resize_handles()
-	set_process(false)
 	print("[%s] resize stops z=%.3f" % [name, global_position.z])
 
 
@@ -277,7 +287,9 @@ func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> 
 		XRToolsPointerEvent.Type.PRESSED:
 			start_resize(handle_id, event.position)
 		XRToolsPointerEvent.Type.MOVED:
-			update_resize(_resolve_pointer_hit(event, _resize_plane))
+			var hit = _resolve_pointer_hit(event, _resize_plane)
+			if hit != null:
+				update_resize(hit)
 		XRToolsPointerEvent.Type.RELEASED:
 			stop_resize()
 		_:
@@ -293,7 +305,9 @@ func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
 				start_resize(handle, event.position)
 		XRToolsPointerEvent.Type.MOVED:
 			if _resizing:
-				update_resize(_resolve_pointer_hit(event, _resize_plane))
+				var hit = _resolve_pointer_hit(event, _resize_plane)
+				if hit != null:
+					update_resize(hit)
 		XRToolsPointerEvent.Type.RELEASED:
 			if _resizing:
 				stop_resize()
@@ -363,112 +377,13 @@ func _rebuild_resize_handles() -> void:
 		# connect pointer events to this handle
 		area.input_ray_pickable = true
 
-# ── TEMP: mouse testing, delete when testing on headset ──────────────────────
-
-func _input(event: InputEvent) -> void:
-	pass
-	# NOTE: Disabling mouse testing by default for now, since it doesn't work well with xr tools
-	#if not XRUtils.is_openxr_active():
-		#if event is InputEventMouseButton:
-			#if event.button_index == MOUSE_BUTTON_LEFT:
-				#if event.pressed:
-					## check resize handles first, then fall back to drag
-					#if not _try_start_mouse_resize(event.position):
-						#_try_start_mouse_drag(event.position)
-				#else:
-					#if _resizing:
-						#stop_resize()
-					#else:
-						#stop_drag()
-		#elif event is InputEventMouseMotion:
-			#if _resizing:
-				#_update_mouse_resize(event.position)
-			#elif _dragging:
-				#_update_mouse_drag(event.position)
-
-# Check if mouse clicked on a resize handle, returns true if resize started
-func _try_start_mouse_resize(mouse_pos: Vector2) -> bool:
-	var camera = get_viewport().get_camera_3d()
-	if not camera:
-		return false
-	var ray_origin = camera.project_ray_origin(mouse_pos)
-	var ray_dir    = camera.project_ray_normal(mouse_pos)
-	var ray_end    = ray_origin + ray_dir * 20.0
-
-	# use intersect_point on the space state to find overlapping areas
-	var space = get_world_3d().direct_space_state
-	
-	# check Area3D handles using a separate query
-	var params = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
-	params.collision_mask = 0xFFFFFFFF  # hit everything
-	params.collide_with_areas = true    # this is the key line — detect Area3D
-	params.collide_with_bodies = false  # ignore regular bodies for this check
-	
-	var result = space.intersect_ray(params)
-	if result.is_empty():
-		return false
-	
-	var collider = result.collider
-	if collider is Area3D and collider.has_meta("handle_id"):
-		if _is_own_collider(collider):
-			start_resize(collider.get_meta("handle_id"), result.position)
-			return true
-	return false
-
-# Check if mouse clicked on this window's body, start dragging if so
-func _try_start_mouse_drag(mouse_pos: Vector2) -> void:
-	var camera = get_viewport().get_camera_3d()
-	if not camera:
-		return
-	var ray_origin = camera.project_ray_origin(mouse_pos)
-	var ray_dir    = camera.project_ray_normal(mouse_pos)
-	var ray_end    = ray_origin + ray_dir * 20.0
-	var params     = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
-	var result     = get_world_3d().direct_space_state.intersect_ray(params)
-	if result.is_empty():
-		return
-	if not _is_own_collider(result.collider):
-		return
-	# create a flat plane at the window's depth for smooth tracking
-	var normal = (camera.global_position - global_position).normalized()
-	_drag_plane = Plane(normal, global_position)
-	start_drag(result.position)
-
-# Move the window by tracking mouse against the drag plane
-func _update_mouse_drag(mouse_pos: Vector2) -> void:
-	var camera = get_viewport().get_camera_3d()
-	if not camera:
-		return
-	var ray_origin = camera.project_ray_origin(mouse_pos)
-	var ray_dir    = camera.project_ray_normal(mouse_pos)
-	# plane never misses so movement is always smooth
-	var hit = _drag_plane.intersects_ray(ray_origin, ray_dir)
-	if hit:
-		update_drag(hit)
-
-# Resize the window by tracking mouse against the resize plane
-func _update_mouse_resize(mouse_pos: Vector2) -> void:
-	var camera = get_viewport().get_camera_3d()
-	if not camera:
-		return
-	var ray_origin = camera.project_ray_origin(mouse_pos)
-	var ray_dir    = camera.project_ray_normal(mouse_pos)
-	var hit = _resize_plane.intersects_ray(ray_origin, ray_dir)
-	if hit:
-		update_resize(hit)
-
-# Walk up the node tree to check if a collider belongs to this window
-func _is_own_collider(collider: Object) -> bool:
-	var current = collider as Node
-	while current:
-		if current == self:
-			return true
-		current = current.get_parent()
-	return false
-# ── END TEMP ──────────────────────────────────────────────────────────────────
 
 
 ## Self-cleaning function that destroys window content
 func close() -> void:
+	# cancel any in-flight gesture so a missed RELEASED can't leave stale state
+	_dragging = false
+	_resizing = false
+	set_process(false)
 	on_closed.emit()
 	queue_free()
