@@ -21,9 +21,6 @@ const Z_STEP: float = 0.05
 ## positions — so depth cannot drift off the Z_STEP grid.
 const LAYER_ORIGIN_Z: float = -2.0
 
-## Base XY position; z always comes from z_order (see apply_z_order)
-var base_position: Vector3 = Vector3.ZERO
-
 # Drag state variables
 var _dragging    := false
 var _drag_offset := Vector3.ZERO
@@ -51,8 +48,6 @@ const PIXELS_PER_UNIT : float = 150.0
 # position — equivalent only while the WindowManager sits at the world origin,
 # unrotated and unscaled.
 func _ready() -> void:
-	base_position = position
-
 	var window_header: SWindowHeader = header_3d.get_scene_instance()
 	window_header.close_pressed.connect(close)
 	
@@ -125,14 +120,10 @@ func set_input_enabled(enabled: bool) -> void:
 	content_3d.input_keyboard = enabled
 	content_3d.input_gamepad = enabled
 
-## Updates the window's position based on its z-order
+## Updates the window's depth based on its z-order
 func apply_z_order() -> void:
-	# depth comes exclusively from z_order; base_position only contributes XY
-	position = Vector3(
-		base_position.x,
-		base_position.y,
-		LAYER_ORIGIN_Z + z_order * Z_STEP
-	)
+	# depth comes exclusively from z_order; XY is left untouched
+	position.z = LAYER_ORIGIN_Z + z_order * Z_STEP
 
 ## Visual feedback when the current window becomes the focused window
 func set_focused_visual(is_focused: bool) -> void:
@@ -174,8 +165,6 @@ func _process(delta: float) -> void:
 	var next := global_position.lerp(_drag_target, 1.0 - exp(-follow_speed * delta))
 	global_position.x = next.x
 	global_position.y = next.y
-	base_position.x = global_position.x
-	base_position.y = global_position.y
 
 # Called when the user releases controller
 func stop_drag() -> void:
@@ -238,8 +227,6 @@ func update_resize(hit_world: Vector3) -> void:
 			global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
 		global_position.x = shifted.x
 		global_position.y = shifted.y
-		base_position.x = global_position.x
-		base_position.y = global_position.y
 	_apply_content_size_mesh_only(clamped)
 
 
