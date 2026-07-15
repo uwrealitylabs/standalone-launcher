@@ -14,6 +14,11 @@ signal pointer_exited(target: Node)
 @export var debounce_time: float = 0.15
 
 var _current_target: Node = null
+# Target grabbed at pinch start; all gesture events go here until release
+var _locked_target: Node = null
+# Target's facing plane frozen at pinch start; gesture positions are
+# ray/plane intersections so tracking continues anywhere in space
+var _locked_plane := Plane()
 var _was_pinching: bool = false
 var _debounce_timer: float = 0.0
 var _raycast: RayCast3D = null
@@ -44,7 +49,15 @@ func _ready():
 	ray_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	ray_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_ray_mesh.material_override = ray_mat
-	add_child(_ray_mesh)
+	# The beam lives on the index-fingertip bone (its historical frame): it
+	# hangs off the finger along the bone's -Z, tilting with the hand, while
+	# the functional ray stays controller-mounted
+	var beam_anchor := get_parent().find_child("BoneAttachment3D", true, false)
+	if beam_anchor:
+		beam_anchor.add_child(_ray_mesh)
+	else:
+		push_warning("HandPointer: no BoneAttachment3D found; beam stays on pointer")
+		add_child(_ray_mesh)
 
 	# create the cursor dot at the hit point
 	_cursor_dot = MeshInstance3D.new()
@@ -85,6 +98,9 @@ func _process(delta: float):
 
 
 func _process_hit_test():
+	# Don't retarget mid-gesture; hover state stays on the grabbed target
+	if is_instance_valid(_locked_target):
+		return
 	if _raycast.is_colliding():
 		var collider = _raycast.get_collider()
 		if collider != _current_target:
@@ -100,28 +116,50 @@ func _process_hit_test():
 
 func _process_tap(pinch_value: float):
 	var is_pinching = pinch_value >= pinch_threshold
-	var hit_pos = _raycast.get_collision_point() if _raycast.is_colliding() else Vector3.ZERO
 
 	if is_pinching and not _was_pinching:
-		_send_xr_event(XRToolsPointerEvent.Type.PRESSED, hit_pos)
-		if _current_target and _debounce_timer <= 0.0:
-			pointer_activated.emit(_current_target, hit_pos)
-			_debounce_timer = debounce_time
+		# grab whatever the ray is on and freeze its facing plane; all
+		# gesture positions come from ray/plane intersections, never raw
+		# collision points (those sit on the collider surface, off-plane)
+		_locked_target = _current_target
+		if _locked_target is Node3D:
+			var xform: Transform3D = _locked_target.global_transform
+			_locked_plane = Plane(xform.basis.z, xform.origin)
+		var hit = _locked_plane_hit()
+		if hit != null:
+			_send_xr_event(XRToolsPointerEvent.Type.PRESSED, _locked_target, hit)
+			if _debounce_timer <= 0.0 and _locked_target:
+				pointer_activated.emit(_locked_target, hit)
+				_debounce_timer = debounce_time
 
-	# moving the window
+	# gesture continues even if the ray leaves every collider
 	elif is_pinching and _was_pinching:
-		_send_xr_event(XRToolsPointerEvent.Type.MOVED, hit_pos)
+		var hit = _locked_plane_hit()
+		if hit != null:
+			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _locked_target, hit)
 
 	elif not is_pinching and _was_pinching:
-		_send_xr_event(XRToolsPointerEvent.Type.RELEASED, hit_pos)
+		var hit = _locked_plane_hit()
+		if hit != null:
+			_send_xr_event(XRToolsPointerEvent.Type.RELEASED, _locked_target, hit)
+		_locked_target = null
 
 	_was_pinching = is_pinching
 
-func _send_xr_event(type: int, pos: Vector3):
-	if not _current_target: return
-	
+
+## Intersects the pointer ray with the frozen gesture plane. Returns null
+## when there is no locked target or the ray misses the plane this frame.
+func _locked_plane_hit() -> Variant:
+	if not is_instance_valid(_locked_target):
+		return null
+	return _locked_plane.intersects_ray(get_ray_origin(), get_ray_direction())
+
+
+func _send_xr_event(type: int, target: Node, pos: Vector3):
+	if not is_instance_valid(target): return
+
 	# find the parents Viewport node of a child node
-	var target_node = _current_target
+	var target_node = target
 	if not target_node.has_signal("pointer_event"):
 		if target_node.get_parent() and target_node.get_parent().has_signal("pointer_event"):
 			target_node = target_node.get_parent()
@@ -134,7 +172,7 @@ func _send_xr_event(type: int, pos: Vector3):
 func _update_visuals():
 	if _raycast.is_colliding():
 		var hit_point = _raycast.get_collision_point()
-		var hit_dist = global_position.distance_to(hit_point)
+		var hit_dist = _ray_mesh.get_parent().global_position.distance_to(hit_point)
 
 		# update ray length to stop at hit point
 		_ray_mesh.mesh.height = hit_dist

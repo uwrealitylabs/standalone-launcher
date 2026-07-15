@@ -32,6 +32,10 @@ var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as ne
 # Resize window variables
 var _resizing          := false
 var _resize_handle     := ""
+# World-space grab point; deltas are measured in world space because the
+# window itself moves during L/B resizes — measuring in the live local frame
+# would feed the position shift back into the measurement (edge tracks only
+# 2/3 of pointer motion and oscillates)
 var _resize_start_hit  := Vector3.ZERO
 var _resize_start_size := Vector2.ZERO
 var _resize_start_pos  := Vector3.ZERO
@@ -148,7 +152,7 @@ func start_drag(hit_world: Vector3) -> void:
 	_drag_target = global_position
 	_drag_plane = _get_plane()
 	set_process(true)
-	print("[%s] drag start z=%.3f" % [name, global_position.z])
+	print("[%s] drag start z=%.5f" % [name, global_position.z])
 
 ## Called whenever the pointer moves while dragging
 func update_drag(hit_world: Vector3) -> void:
@@ -170,7 +174,7 @@ func _process(delta: float) -> void:
 func stop_drag() -> void:
 	_dragging = false
 	set_process(false)
-	print("[%s] drag end z=%.3f" % [name, global_position.z])
+	print("[%s] drag end z=%.5f" % [name, global_position.z])
 
 ## Keeps the window within world bounds
 func _clamp_to_bounds(pos: Vector3) -> Vector3:
@@ -183,20 +187,21 @@ func start_resize(handle: String, hit_world: Vector3) -> void:
 	focus()
 	_resizing          = true
 	_resize_handle     = handle
-	_resize_start_hit  = to_local(hit_world)
+	_resize_start_hit  = hit_world
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
 	_resize_plane = _get_plane()
-	print("[%s] resize start z=%.3f" % [name, global_position.z])
+	print("[%s] resize start z=%.5f" % [name, global_position.z])
 
 
 ## Called every frame while resize handle is held
 func update_resize(hit_world: Vector3) -> void:
 	if not _resizing:
 		return
+	# NOTE: Assumes window is unrotated (world XY == window XY)
 	var delta := Vector2(
-		to_local(hit_world).x - _resize_start_hit.x,
-		to_local(hit_world).y - _resize_start_hit.y
+		hit_world.x - _resize_start_hit.x,
+		hit_world.y - _resize_start_hit.y
 	)
 	var new_size := _resize_start_size
 	var pos_shift := Vector2.ZERO
@@ -237,7 +242,7 @@ func stop_resize() -> void:
 	# only update viewport resolution when done - expensive operation
 	_update_content_viewport_resolution()
 	_rebuild_resize_handles()
-	print("[%s] resize stops z=%.3f" % [name, global_position.z])
+	print("[%s] resize stops z=%.5f" % [name, global_position.z])
 
 
 ## Resize the content mesh without updating viewport
