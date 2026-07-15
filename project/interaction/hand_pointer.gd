@@ -14,11 +14,11 @@ signal pointer_exited(target: Node)
 @export var debounce_time: float = 0.15
 
 var _current_target: Node = null
-# Target grabbed at pinch start; all gesture events go here until release
+# Target grabbed at pinch start; all gesture events go here until release.
+# Gesture positions are ray intersections with the target's LIVE facing
+# plane (see _locked_plane_hit) — never collider surface points — so
+# tracking continues off-collider and follows z-order changes mid-gesture.
 var _locked_target: Node = null
-# Target's facing plane frozen at pinch start; gesture positions are
-# ray/plane intersections so tracking continues anywhere in space
-var _locked_plane := Plane()
 var _was_pinching: bool = false
 var _debounce_timer: float = 0.0
 var _raycast: RayCast3D = null
@@ -118,15 +118,13 @@ func _process_tap(pinch_value: float):
 	var is_pinching = pinch_value >= pinch_threshold
 
 	if is_pinching and not _was_pinching:
-		# grab whatever the ray is on and freeze its facing plane; all
-		# gesture positions come from ray/plane intersections, never raw
-		# collision points (those sit on the collider surface, off-plane)
+		# grab whatever the ray is on; gesture positions come from ray/plane
+		# intersections, never raw collision points (those sit on the
+		# collider surface, off-plane)
 		_locked_target = _current_target
-		if _locked_target is Node3D:
-			var xform: Transform3D = _locked_target.global_transform
-			_locked_plane = Plane(xform.basis.z, xform.origin)
 		var hit = _locked_plane_hit()
 		if hit != null:
+			# print("[hand_pointer] PRESSED hit z=%.5f" % hit.z)
 			_send_xr_event(XRToolsPointerEvent.Type.PRESSED, _locked_target, hit)
 			if _debounce_timer <= 0.0 and _locked_target:
 				pointer_activated.emit(_locked_target, hit)
@@ -136,23 +134,33 @@ func _process_tap(pinch_value: float):
 	elif is_pinching and _was_pinching:
 		var hit = _locked_plane_hit()
 		if hit != null:
+			# print("[hand_pointer] MOVED hit z=%.5f" % hit.z)
 			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _locked_target, hit)
 
 	elif not is_pinching and _was_pinching:
 		var hit = _locked_plane_hit()
 		if hit != null:
+			# print("[hand_pointer] RELEASED hit z=%.5f" % hit.z)
 			_send_xr_event(XRToolsPointerEvent.Type.RELEASED, _locked_target, hit)
 		_locked_target = null
 
 	_was_pinching = is_pinching
 
 
-## Intersects the pointer ray with the frozen gesture plane. Returns null
-## when there is no locked target or the ray misses the plane this frame.
+## Intersects the pointer ray with the locked target's facing plane. Returns
+## null when there is no locked target or the ray misses the plane this frame.
+## The plane is derived from the target's LIVE transform on every call, so a
+## depth change mid-gesture (e.g. focus raising the window's z-order) moves
+## the plane with it instead of leaving events on a stale depth. This is
+## feedback-safe: gestures move windows in X/Y only while the plane depends
+## only on the target's Z, which is owned by z-order.
 func _locked_plane_hit() -> Variant:
 	if not is_instance_valid(_locked_target):
 		return null
-	return _locked_plane.intersects_ray(get_ray_origin(), get_ray_direction())
+	if not _locked_target is Node3D:
+		return null
+	var t: Transform3D = _locked_target.global_transform
+	return Plane(t.basis.z, t.origin).intersects_ray(get_ray_origin(), get_ray_direction())
 
 
 func _send_xr_event(type: int, target: Node, pos: Vector3):

@@ -25,7 +25,12 @@ const LAYER_ORIGIN_Z: float = -2.0
 var _dragging    := false
 var _drag_offset := Vector3.ZERO
 var _drag_target := Vector3.ZERO
-var _drag_plane  := Plane()  # frozen at grab time so the window can't drift in depth
+# Frozen at grab time so the window can't drift in depth. Residual: if an
+# OUTSIDE cause changes this window's z-order mid-gesture (e.g. another
+# window closing), the frozen plane (and _resize_plane below) is one z-step
+# off until release — accepted; window depth itself stays on the z_order
+# grid. HandPointer's own plane is live-derived and does not share this.
+var _drag_plane  := Plane()
 var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as needed
 @export var follow_speed: float = 30.0
 
