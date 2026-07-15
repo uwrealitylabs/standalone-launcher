@@ -72,15 +72,15 @@ func _ready() -> void:
 ## Invoked when a pointer event on the window is detected
 func _on_pointer_event(event: XRToolsPointerEvent):
 	if event.event_type == XRToolsPointerEvent.Type.PRESSED:  # Focus this window when "pressed"
-		# print("(before focus) [%s] z=%.3f" % [name, global_position.z])
+		# print("(before focus) [%s] z=%.5f" % [name, global_position.z])
 		focus()
-		# print("(after focus) [%s] z=%.3f" % [name, global_position.z])
+		# print("(after focus) [%s] z=%.5f" % [name, global_position.z])
 
 
 func _on_header_pointer_event(event: XRToolsPointerEvent):
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
-			start_drag(event.position)
+			start_drag(event)
 		XRToolsPointerEvent.Type.MOVED:
 			var hit = _resolve_pointer_hit(event, _drag_plane)
 			if hit != null:
@@ -144,13 +144,20 @@ func _get_plane() -> Plane:
 	return Plane(Vector3(0, 0, 1), global_position)  # NOTE: Assumes window XY-axis-aligned
 
 ## Called when the user grabs the header
-func start_drag(hit_world: Vector3) -> void:
+func start_drag(event: XRToolsPointerEvent) -> void:
+	# Focus first: it can raise the window by n*Z_STEP, so the gesture plane
+	# must be frozen at the NEW depth. The baseline is then resolved against
+	# that same plane — never event.position, which sits on the pre-focus
+	# plane and would pop the window sideways on the first MOVED frame.
 	focus()
+	_drag_plane = _get_plane()
+	var hit = _resolve_pointer_hit(event, _drag_plane)
+	if hit == null:
+		return
 	_dragging = true
-	_drag_offset = global_position - hit_world
+	_drag_offset = global_position - hit
 	_drag_offset.z = 0.0
 	_drag_target = global_position
-	_drag_plane = _get_plane()
 	set_process(true)
 	print("[%s] drag start z=%.5f" % [name, global_position.z])
 
@@ -183,14 +190,19 @@ func _clamp_to_bounds(pos: Vector3) -> Vector3:
 	return pos
 
 ## Called when user grabs a resize handle
-func start_resize(handle: String, hit_world: Vector3) -> void:
+func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
+	# Same plane discipline as start_drag: freeze the plane post-focus and
+	# resolve the baseline against it so baseline and MOVED frames agree.
 	focus()
+	_resize_plane = _get_plane()
+	var hit = _resolve_pointer_hit(event, _resize_plane)
+	if hit == null:
+		return
 	_resizing          = true
 	_resize_handle     = handle
-	_resize_start_hit  = hit_world
+	_resize_start_hit  = hit
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
-	_resize_plane = _get_plane()
 	print("[%s] resize start z=%.5f" % [name, global_position.z])
 
 
@@ -277,7 +289,7 @@ func _reposition_header() -> void:
 func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> void:
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
-			start_resize(handle_id, event.position)
+			start_resize(handle_id, event)
 		XRToolsPointerEvent.Type.MOVED:
 			var hit = _resolve_pointer_hit(event, _resize_plane)
 			if hit != null:
@@ -294,7 +306,7 @@ func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
 			var handle = _get_handle_from_world_pos(event.position)
 			if handle != "":
 				# pointer is near an edge — start resize
-				start_resize(handle, event.position)
+				start_resize(handle, event)
 		XRToolsPointerEvent.Type.MOVED:
 			if _resizing:
 				var hit = _resolve_pointer_hit(event, _resize_plane)
