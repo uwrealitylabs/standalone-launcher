@@ -1,4 +1,4 @@
-class_name WindowManager extends Node
+class_name WindowManager extends Node3D
 
 # Window creator and manager system
 # Instantiates new window using window.tscn template and stores it in an array
