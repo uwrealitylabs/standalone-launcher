@@ -30,6 +30,14 @@ func _distinct_depths(wm: WindowManager) -> bool:
 	return true
 
 
+# Builds a PRESSED event with a null (non-hand) pointer, which makes
+# _resolve_pointer_hit project the position onto the frozen gesture plane —
+# lets the test drive start_drag/start_resize without a live HandPointer.
+func _press_at(win: SWindow, world_pos: Vector3) -> XRToolsPointerEvent:
+	return XRToolsPointerEvent.new(
+		XRToolsPointerEvent.Type.PRESSED, null, win, world_pos, world_pos)
+
+
 func _initialize() -> void:
 	var wm_scene: PackedScene = load("res://project/windowing/window_manager.tscn")
 	var wm: WindowManager = wm_scene.instantiate()
@@ -48,7 +56,7 @@ func _initialize() -> void:
 
 	# --- drag w3, change stack mid-drag (the old drift repro) ---
 	var a: SWindow = wins[0]
-	w3.start_drag(w3.global_position)
+	w3.start_drag(_press_at(w3, w3.global_position))
 	w3.update_drag(w3.global_position + Vector3(0.4, 0.2, 0.0))
 	for i in 5:
 		await process_frame
@@ -65,7 +73,7 @@ func _initialize() -> void:
 		wm.windows_list == before)
 
 	# --- resize w3, change stack mid-resize (the old shared-z repro) ---
-	w3.start_resize("R", w3.global_position + Vector3(0.75, 0, 0))
+	w3.start_resize("R", _press_at(w3, w3.global_position + Vector3(0.75, 0, 0)))
 	w3.update_resize(w3.global_position + Vector3(0.9, 0, 0))
 	a.focus()
 	w3.update_resize(w3.global_position + Vector3(1.0, 0, 0))
@@ -77,7 +85,7 @@ func _initialize() -> void:
 	# --- close focused window mid-drag of another ---
 	a.focus()  # ensure the closed window is not the dragged one
 	var focused := wm.get_focused_window()
-	w3.start_drag(w3.global_position)
+	w3.start_drag(_press_at(w3, w3.global_position))
 	focused.close()
 	await process_frame
 	await process_frame
