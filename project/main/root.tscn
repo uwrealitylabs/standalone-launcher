@@ -100,10 +100,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.155, 0)
 strafe = false
 enabled = false
 
-[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_left/LeftHand/Hand_Nails_low_L/Armature/Skeleton3D/BoneAttachment3D" index="1"]
+[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_left"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.02, 0.05, -0.1)
 target_position = Vector3(0, 0, -7)
+collision_mask = 4194304
 
-[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_left/LeftHand/Hand_Nails_low_L/Armature/Skeleton3D/BoneAttachment3D" index="2"]
+[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_left"]
 script = ExtResource("3_5l8kh")
 
 [node name="AnimationTree" parent="XROrigin3D/XRController3D_left/LeftHand" index="1"]
@@ -111,12 +113,14 @@ tree_root = SubResource("AnimationNodeBlendTree_vem7x")
 
 [node name="FunctionPointer" parent="XROrigin3D/XRController3D_left" index="3" instance=ExtResource("4_41lny")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.02, 0.05, -0.1)
+enabled = false
 
-[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_right/RightHand/Hand_Nails_low_R/Armature/Skeleton3D/BoneAttachment3D" index="1"]
+[node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_right"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.02, 0.05, -0.1)
 target_position = Vector3(0, 0, -7)
 collision_mask = 4194304
 
-[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_right/RightHand/Hand_Nails_low_R/Armature/Skeleton3D/BoneAttachment3D" index="2"]
+[node name="HandPointer" type="Node3D" parent="XROrigin3D/XRController3D_right"]
 script = ExtResource("3_5l8kh")
 
 [node name="AnimationTree" parent="XROrigin3D/XRController3D_right/RightHand" index="1"]
@@ -124,6 +128,7 @@ tree_root = SubResource("AnimationNodeBlendTree_amk11")
 
 [node name="FunctionPointer" parent="XROrigin3D/XRController3D_right" index="4" instance=ExtResource("4_41lny")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.02, 0.05, -0.1)
+enabled = false
 
 [node name="PlayerBody" parent="XROrigin3D" index="3"]
 collision_layer = 524289

@@ -22,9 +22,9 @@ func create_window(pos: Vector3 = Vector3.ZERO, content: PackedScene = null) -> 
 	win.on_closed.connect(func(): _on_window_closed(win))
 	win.on_focused.connect(_on_window_focused)
 
-	# new window gets top z-order
-	#bring_to_front(win)
-	
+	# new window gets top z-order and focus
+	_on_window_focused(win)
+
 	if content:
 		win.set_content(content)
 
@@ -130,18 +130,27 @@ func _recalculate_z_order() -> void:
 func _on_window_closed(win: Node3D) -> void:
 	print("removed from window list")
 	windows_list.erase(win)
+	if win == _focused:
+		_focused = null
 	_recalculate_z_order()
+	# promote the new frontmost window so input focus matches the visual state
+	if not _focused and not windows_list.is_empty():
+		_on_window_focused(windows_list[-1])
 
 
 # Handle window focus request
 func _on_window_focused(win: SWindow) -> void:
+	# idempotent: re-pressing the focused window must not reshuffle the stack
+	# (a mid-drag recalculation is what used to knock depth off the grid)
+	if win == _focused:
+		return
+
 	if _focused:
 		_focused.set_input_enabled(false)
-	
+
 	bring_to_front(win)
 	win.set_input_enabled(true)
 	_focused = win
-	
 
 
 func _ready() -> void:
