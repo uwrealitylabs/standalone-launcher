@@ -138,8 +138,13 @@ collision_layer = 524289
 [node name="Environment" parent="." instance=ExtResource("4_5l8kh")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.68150544, 0)
 
-[node name="WindowManager" parent="XROrigin3D" instance=ExtResource("8_41lny")]
+[node name="WindowFollow" type="RemoteTransform3D" parent="XROrigin3D"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.0, 0)
+remote_path = NodePath("../../WindowManager")
+update_rotation = false
+update_scale = false
+
+[node name="WindowManager" parent="." instance=ExtResource("8_41lny")]
 
 [editable path="XROrigin3D"]
 [editable path="XROrigin3D/XRController3D_left/LeftHand"]

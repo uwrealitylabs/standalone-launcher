@@ -54,8 +54,10 @@ const MAX_CONTENT_SIZE := Vector2(3.0, 2.5)
 const PIXELS_PER_UNIT : float = 150.0
 
 # NOTE: Gesture code uses global_position while apply_z_order sets local
-# position — equivalent only while the WindowManager sits at the world origin,
-# unrotated and unscaled.
+# position — these agree as long as the WindowManager stays unrotated and
+# unscaled. A RemoteTransform3D (root.tscn) drives it in position only, so it is
+# translated by locomotion but never rotated/scaled; the per-axis translation is
+# safe for the mixed local-z / global-xy writes below.
 func _ready() -> void:
 	var window_header: SWindowHeader = header_3d.get_scene_instance()
 	window_header.close_pressed.connect(close)
