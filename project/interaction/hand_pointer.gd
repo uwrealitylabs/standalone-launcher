@@ -149,16 +149,16 @@ func _process_tap(pinch_value: float):
 
 ## Intersects the pointer ray with the locked target's facing plane. Returns
 ## null when there is no locked target or the ray misses the plane this frame.
-## The plane is derived from the target's LIVE transform on every call, so a
-## depth change mid-gesture (e.g. focus raising the window's z-order) moves
-## the plane with it instead of leaving events on a stale depth. This is
-## feedback-safe: gestures move windows in X/Y only while the plane depends
-## only on the target's Z, which is owned by z-order.
 func _locked_plane_hit() -> Variant:
 	if not is_instance_valid(_locked_target):
 		return null
 	if not _locked_target is Node3D:
 		return null
+	# Derive the plane from the target's LIVE transform every call so a
+	# mid-gesture depth change (e.g. focus raising z-order) moves the plane with
+	# it instead of leaving events on a stale depth. Feedback-safe: gestures
+	# move windows in X/Y only, while the plane depends only on the target's Z
+	# (owned by z-order).
 	var t: Transform3D = _locked_target.global_transform
 	return Plane(t.basis.z, t.origin).intersects_ray(get_ray_origin(), get_ray_direction())
 

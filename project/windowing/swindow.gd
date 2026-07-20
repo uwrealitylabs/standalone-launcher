@@ -27,9 +27,9 @@ var _drag_offset := Vector3.ZERO
 var _drag_target := Vector3.ZERO
 # Frozen at grab time so the window can't drift in depth. Residual: if an
 # OUTSIDE cause changes this window's z-order mid-gesture (e.g. another
-# window closing), the frozen plane (and _resize_plane below) is one z-step
-# off until release — accepted; window depth itself stays on the z_order
-# grid. HandPointer's own plane is live-derived and does not share this.
+# window closing), the frozen gesture planes are one z-step off until
+# release — accepted; window depth itself stays on the z_order grid. The
+# pointer's own plane is live-derived and does not share this.
 var _drag_plane  := Plane()
 var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as needed
 @export var follow_speed: float = 30.0
@@ -198,8 +198,9 @@ func _clamp_to_bounds(pos: Vector3) -> Vector3:
 
 ## Called when user grabs a resize handle
 func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
-	# Same plane discipline as start_drag: freeze the plane post-focus and
-	# resolve the baseline against it so baseline and MOVED frames agree.
+	# Freeze the gesture plane after focusing (focus can raise the window by
+	# n*Z_STEP) and resolve the baseline against that same plane, so the
+	# baseline and later MOVED frames agree.
 	focus()
 	_resize_plane = _get_plane()
 	var hit = _resolve_pointer_hit(event, _resize_plane)
@@ -382,10 +383,8 @@ func _rebuild_resize_handles() -> void:
 		area.set_meta("handle_id", handle_id)
 		if not area.has_user_signal("pointer_event"):
 			area.add_user_signal("pointer_event")
-		# assert(area.has_signal("pointer_event")) #TEMP: remove after passes
 		area.connect("pointer_event", func(event: XRToolsPointerEvent): _on_handle_pointer_event(handle_id, event))
 		root.add_child(area)
-		# connect pointer events to this handle
 		area.input_ray_pickable = true
 
 
