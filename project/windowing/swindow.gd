@@ -46,12 +46,15 @@ var _resize_start_size := Vector2.ZERO
 var _resize_start_pos  := Vector3.ZERO
 var _resize_plane      := Plane()
 
-# Size of the actual content, not the header
-var content_size := Vector2(1.5, 0.75)  # match your QuadMesh default size
+# Size of the actual content, not the header. The literal is a placeholder.
+var content_size := Vector2(1.5, 0.75)
 const HEADER_HEIGHT  : float = 0.08     # fixed header height in world units
 const MIN_CONTENT_SIZE := Vector2(0.4, 0.2)
 const MAX_CONTENT_SIZE := Vector2(3.0, 2.5)
+# Render density of each surface. Held constant across resizes so a bigger
+# window buys more room rather than bigger content.
 var PIXELS_PER_UNIT := 150.0
+var HEADER_PIXELS_PER_UNIT := 150.0
 
 # NOTE: Gesture code uses global_position while apply_z_order sets local
 # position — these agree as long as the WindowManager stays unrotated and
@@ -61,22 +64,26 @@ var PIXELS_PER_UNIT := 150.0
 func _ready() -> void:
 	var window_header: SWindowHeader = header_3d.get_scene_instance()
 	window_header.close_pressed.connect(close)
-	
+
 	set_content(content)
 	set_input_enabled(false)
-	
+
 	header_3d.pointer_event.connect(_on_pointer_event)
 	header_3d.pointer_event.connect(_on_header_pointer_event)
 	content_3d.pointer_event.connect(_on_pointer_event)
 	content_3d.pointer_event.connect(_on_content_pointer_event)
-	
+
+	# Seed from the authored scene, not from the script defaults above, so the
+	# two cannot silently disagree.
+	content_size = content_3d.screen_size
 	PIXELS_PER_UNIT = content_3d.viewport_size.x / (0.00001 + content_3d.screen_size.x)
+	HEADER_PIXELS_PER_UNIT = header_3d.viewport_size.x / (0.00001 + header_3d.screen_size.x)
 
 	if not XRUtils.is_openxr_active():
 		header_3d.enabled = true
 		content_3d.set_process_input(false)
-	_rebuild_resize_handles()
-	
+	_apply_size(content_size)
+
 
 ## Invoked when a pointer event on the window is detected
 func _on_pointer_event(event: XRToolsPointerEvent):
@@ -254,38 +261,49 @@ func update_resize(hit_world: Vector3) -> void:
 			global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
 		global_position.x = shifted.x
 		global_position.y = shifted.y
-	_apply_content_size_mesh_only(clamped)
+	_apply_size(clamped, true)
 
 
 ## Called when user releases resize handle
 func stop_resize() -> void:
 	_resizing      = false
 	_resize_handle = ""
-	# only update viewport resolution when done - expensive operation
-	_update_content_viewport_resolution()
-	_rebuild_resize_handles()
+	# Gesture over: pick up the work that was too expensive to do per frame
+	_apply_size(content_size)
 	print("[%s] resize stops z=%.5f" % [name, global_position.z])
 
 
-## Resize the content mesh without updating viewport
-func _apply_content_size_mesh_only(new_size: Vector2) -> void:
+## Resizes the window's content to `new_size`, clamped to MIN/MAX_CONTENT_SIZE,
+## and brings the header and both screens' geometry with it.
+##
+## Sole writer of size state. `live` omits the render resolutions and the
+## resize handles; the caller must call again without it to settle them.
+func _apply_size(new_size: Vector2, live: bool = false) -> void:
 	content_size = new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
-	var content_mesh := content_3d.get_node("Screen") as MeshInstance3D
-	if content_mesh and content_mesh.mesh is QuadMesh:
-		(content_mesh.mesh as QuadMesh).size = content_size
-	# reposition header to sit on top of content
-	_reposition_header()
+	var header_size := Vector2(content_size.x, HEADER_HEIGHT)
 
-## Update content viewport resolution to match content mesh size
-func _update_content_viewport_resolution() -> void:
-	content_3d.viewport_size = content_size * PIXELS_PER_UNIT
+	# Assigning screen_size drives the quad, the static body's translator and
+	# the collision shape as one, so they cannot disagree mid-gesture.
 	content_3d.screen_size = content_size
-	
-## Keeps the header sitting on top of the content area
-func _reposition_header() -> void:
-	var header_node := get_node("Header") as Node3D
-	if header_node:
-		header_node.position.y = (content_size.y / 2.0) + (HEADER_HEIGHT / 2.0)
+	header_3d.screen_size = header_size
+	# Header sits on top of the content; both are centred on the window
+	header_3d.position.y = (content_size.y + HEADER_HEIGHT) / 2.0
+
+	if live:
+		return
+
+	# Reallocating a render target and rebuilding the handle nodes are both too
+	# costly to repeat every frame of a drag.
+	content_3d.viewport_size = _viewport_resolution(content_size, PIXELS_PER_UNIT)
+	header_3d.viewport_size = _viewport_resolution(header_size, HEADER_PIXELS_PER_UNIT)
+	_rebuild_resize_handles()
+
+
+## Render resolution for a screen of `size` world units at `ppu` pixels per
+## unit, rounded, never smaller than one pixel on either axis.
+func _viewport_resolution(size: Vector2, ppu: float) -> Vector2:
+	# A zero-sized viewport is invalid, so the floor is a hard requirement
+	return Vector2(maxf(1.0, roundf(size.x * ppu)), maxf(1.0, roundf(size.y * ppu)))
 
 
 ## Invoked when a resize handle's pointer event signal is received

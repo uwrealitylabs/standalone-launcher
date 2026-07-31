@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3 uid="uid://eposco7r4gm8"]
+[gd_scene load_steps=13 format=3 uid="uid://eposco7r4gm8"]
 
 [ext_resource type="Script" uid="uid://ccfrhlog00wu1" path="res://project/windowing/swindow.gd" id="1_idmct"]
 [ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="2_5i7x0"]
@@ -8,6 +8,10 @@
 [sub_resource type="QuadMesh" id="QuadMesh_hnifa"]
 resource_local_to_scene = true
 size = Vector2(1.5, 0.75)
+
+[sub_resource type="QuadMesh" id="QuadMesh_header"]
+resource_local_to_scene = true
+size = Vector2(1.5, 0.08)
 
 [sub_resource type="ViewportTexture" id="ViewportTexture_5i7x0"]
 viewport_path = NodePath("Header/Viewport")
@@ -21,6 +25,10 @@ texture_filter = 1
 [sub_resource type="BoxShape3D" id="BoxShape3D_td1wq"]
 resource_local_to_scene = true
 size = Vector3(1.5, 0.75, 0.02)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_header"]
+resource_local_to_scene = true
+size = Vector3(1.5, 0.08, 0.02)
 
 [sub_resource type="ViewportTexture" id="ViewportTexture_7asek"]
 viewport_path = NodePath("Content/Viewport")
@@ -39,7 +47,8 @@ content_3d = NodePath("Content")
 metadata/_custom_type_script = "uid://eavk7267igp7"
 
 [node name="Header" parent="." instance=ExtResource("2_5i7x0")]
-transform = Transform3D(1, 0, 0, 0, 0.1, 0, 0, 0, 1, 0, 0.41172367, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.415, 0)
+screen_size = Vector2(1.5, 0.08)
 scene = ExtResource("2_832o4")
 viewport_size = Vector2(399.93, 20)
 scene_properties_keys = PackedStringArray("window_header.gd")
@@ -48,14 +57,15 @@ scene_properties_keys = PackedStringArray("window_header.gd")
 size = Vector2i(399, 20)
 
 [node name="Screen" parent="Header" index="1"]
-mesh = SubResource("QuadMesh_hnifa")
+mesh = SubResource("QuadMesh_header")
 surface_material_override/0 = SubResource("StandardMaterial3D_hnifa")
 
 [node name="StaticBody3D" parent="Header" index="2"]
+screen_size = Vector2(1.5, 0.08)
 viewport_size = Vector2(399.93, 20)
 
 [node name="CollisionShape3D" parent="Header/StaticBody3D" index="0"]
-shape = SubResource("BoxShape3D_td1wq")
+shape = SubResource("BoxShape3D_header")
 
 [node name="Content" parent="." instance=ExtResource("2_5i7x0")]
 scene = null
