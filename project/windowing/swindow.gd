@@ -51,7 +51,7 @@ var content_size := Vector2(1.5, 0.75)  # match your QuadMesh default size
 const HEADER_HEIGHT  : float = 0.08     # fixed header height in world units
 const MIN_CONTENT_SIZE := Vector2(0.4, 0.2)
 const MAX_CONTENT_SIZE := Vector2(3.0, 2.5)
-const PIXELS_PER_UNIT : float = 150.0
+var PIXELS_PER_UNIT := 150.0
 
 # NOTE: Gesture code uses global_position while apply_z_order sets local
 # position — these agree as long as the WindowManager stays unrotated and
@@ -70,6 +70,8 @@ func _ready() -> void:
 	content_3d.pointer_event.connect(_on_pointer_event)
 	content_3d.pointer_event.connect(_on_content_pointer_event)
 	
+	PIXELS_PER_UNIT = content_3d.viewport_size.x / (0.00001 + content_3d.screen_size.x)
+
 	if not XRUtils.is_openxr_active():
 		header_3d.enabled = true
 		content_3d.set_process_input(false)
