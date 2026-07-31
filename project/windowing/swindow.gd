@@ -278,16 +278,9 @@ func _apply_content_size_mesh_only(new_size: Vector2) -> void:
 
 ## Update content viewport resolution to match content mesh size
 func _update_content_viewport_resolution() -> void:
-	var viewport := content_3d.get_node("Viewport") as SubViewport
-	if viewport:
-		viewport.size = Vector2i(
-			int(content_size.x * PIXELS_PER_UNIT),
-			int(content_size.y * PIXELS_PER_UNIT)
-		)
-	var col := content_3d.get_node("StaticBody3D/CollisionShape3D") as CollisionShape3D
-	if col and col.shape is BoxShape3D:
-		(col.shape as BoxShape3D).size = Vector3(content_size.x, content_size.y, 0.02)
-
+	content_3d.viewport_size = content_size * PIXELS_PER_UNIT
+	content_3d.screen_size = content_size
+	
 ## Keeps the header sitting on top of the content area
 func _reposition_header() -> void:
 	var header_node := get_node("Header") as Node3D
