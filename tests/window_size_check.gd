@@ -8,6 +8,7 @@ extends SceneTree
 
 const WINDOW_SCENE := "res://project/windowing/window.tscn"
 const EPS := 0.001
+const THROTTLED := XRToolsViewport2DIn3D.UpdateMode.UPDATE_THROTTLED
 
 var _failures := 0
 
@@ -24,6 +25,9 @@ func _initialize() -> void:
 			str(win.PIXELS_PER_UNIT))
 	_check("HEADER_PIXELS_PER_UNIT seeded from scene",
 			absf(win.HEADER_PIXELS_PER_UNIT - 399.93 / 1.5) < 0.1, str(win.HEADER_PIXELS_PER_UNIT))
+	_check("both surfaces rest on the scene's throttled cadence",
+			win.content_3d.update_mode == THROTTLED and win.header_3d.update_mode == THROTTLED,
+			"%s / %s" % [win.content_3d.update_mode, win.header_3d.update_mode])
 	_check_invariant(win)
 
 	# --- live phase: screens track every frame, resolution waits for the clock ---
@@ -36,6 +40,10 @@ func _initialize() -> void:
 	print("[mid-gesture, inside the commit interval]")
 	_check("content grew to 1.9 wide", absf(win.content_size.x - 1.9) < EPS, str(win.content_size))
 	_check_screens_agree(win)
+	_check("gesture leaves the content redraw cadence alone",
+			win.content_3d.update_mode == THROTTLED, str(win.content_3d.update_mode))
+	_check("gesture leaves the header redraw cadence alone",
+			win.header_3d.update_mode == THROTTLED, str(win.header_3d.update_mode))
 	_check("content resolution waits for the interval",
 			win.content_3d.viewport_size.is_equal_approx(before_content_res),
 			str(win.content_3d.viewport_size))
@@ -44,9 +52,21 @@ func _initialize() -> void:
 			str(win.header_3d.viewport_size))
 
 	# --- pointer stops moving but never releases: the clock must still catch up ---
+	# Standing in for a target that has already been drawn, which is the state a
+	# reallocation would otherwise leave blank until the addon's own clock fires
+	var cvp: SubViewport = _viewport(win, "Content")
+	var hvp: SubViewport = _viewport(win, "Header")
+	cvp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	hvp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	win._process(SWindow.MIN_COMMIT_INTERVAL)
 
 	print("[held still past the interval]")
+	_check("commit re-arms the content redraw",
+			cvp.render_target_update_mode == SubViewport.UPDATE_ONCE,
+			str(cvp.render_target_update_mode))
+	_check("commit re-arms the header redraw",
+			hvp.render_target_update_mode == SubViewport.UPDATE_ONCE,
+			str(hvp.render_target_update_mode))
 	_check("content resolution caught up without a release",
 			not win.content_3d.viewport_size.is_equal_approx(before_content_res),
 			str(win.content_3d.viewport_size))
@@ -58,6 +78,7 @@ func _initialize() -> void:
 
 	# --- a nudge below the tolerance must not earn a reallocation ---
 	var settled_res: Vector2 = win.content_3d.viewport_size
+	cvp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	win.update_resize(win.global_position + Vector3(0.41, 0, 0))
 	win._process(1.0)
 
@@ -65,6 +86,9 @@ func _initialize() -> void:
 	_check("0.5% growth does not earn a reallocation",
 			win.content_3d.viewport_size.is_equal_approx(settled_res),
 			str(win.content_3d.viewport_size))
+	_check("a skipped commit does not re-arm the redraw",
+			cvp.render_target_update_mode == SubViewport.UPDATE_DISABLED,
+			str(cvp.render_target_update_mode))
 
 	# --- release: everything settles exactly, whatever the throttle last did ---
 	win.stop_resize()

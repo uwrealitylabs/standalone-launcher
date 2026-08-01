@@ -325,9 +325,25 @@ func _commit_resolution() -> void:
 	var header_size := Vector2(content_size.x, HEADER_HEIGHT)
 	content_3d.viewport_size = _viewport_resolution(content_size, PIXELS_PER_UNIT)
 	header_3d.viewport_size = _viewport_resolution(header_size, HEADER_PIXELS_PER_UNIT)
+	# Resizing a render target clears it, and the addon only re-arms the refill
+	# on its own throttle clock, which runs at an unrelated phase to this one —
+	# leaving the target blank long enough to read as a flash. Re-arm it here,
+	# on exactly the frames that reallocate.
+	_request_redraw(content_3d)
+	_request_redraw(header_3d)
 	_res_basis = content_size
 	_res_pending = false
 	_since_commit = 0.0
+
+
+## Asks `surface` to redraw its viewport once on the coming frame.
+func _request_redraw(surface: XRToolsViewport2DIn3D) -> void:
+	var viewport := surface.get_node("Viewport") as SubViewport
+	# Assigning re-arms the request even when the property already reads
+	# UPDATE_ONCE: the renderer resets its own copy after drawing and never
+	# writes back here, so skipping the write when the value looks unchanged
+	# would skip the redraw
+	viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
 ## Advances the throttle clock and commits a pending resolution once both the
