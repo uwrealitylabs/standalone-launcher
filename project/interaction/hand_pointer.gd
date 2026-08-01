@@ -124,7 +124,6 @@ func _process_tap(pinch_value: float):
 		_locked_target = _current_target
 		var hit = _locked_plane_hit()
 		if hit != null:
-			# print("[hand_pointer] PRESSED hit z=%.5f" % hit.z)
 			_send_xr_event(XRToolsPointerEvent.Type.PRESSED, _locked_target, hit)
 			if _debounce_timer <= 0.0 and _locked_target:
 				pointer_activated.emit(_locked_target, hit)
@@ -134,13 +133,11 @@ func _process_tap(pinch_value: float):
 	elif is_pinching and _was_pinching:
 		var hit = _locked_plane_hit()
 		if hit != null:
-			# print("[hand_pointer] MOVED hit z=%.5f" % hit.z)
 			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _locked_target, hit)
 
 	elif not is_pinching and _was_pinching:
 		var hit = _locked_plane_hit()
 		if hit != null:
-			# print("[hand_pointer] RELEASED hit z=%.5f" % hit.z)
 			_send_xr_event(XRToolsPointerEvent.Type.RELEASED, _locked_target, hit)
 		_locked_target = null
 

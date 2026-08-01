@@ -1,5 +1,11 @@
 class_name SWindow extends Node3D
 
+# Gesture code writes global_position while apply_z_order writes local position.
+# These agree only while the WindowManager stays unrotated and unscaled: a
+# RemoteTransform3D (root.tscn) drives it in position only, so locomotion
+# translates it but never rotates or scales it, which keeps the mixed
+# local-z / global-xy writes below safe.
+
 @export_group("Content")
 @export var content: PackedScene
 
@@ -17,19 +23,16 @@ var z_order: int = 0
 const Z_STEP: float = 0.05
 
 ## Shared depth baseline for z-order level 0 (in meters).
-## World z is always LAYER_ORIGIN_Z + z_order * Z_STEP — never derived from
-## positions — so depth cannot drift off the Z_STEP grid.
 const LAYER_ORIGIN_Z: float = -2.0
 
 # Drag state variables
 var _dragging    := false
 var _drag_offset := Vector3.ZERO
 var _drag_target := Vector3.ZERO
-# Frozen at grab time so the window can't drift in depth. Residual: if an
-# OUTSIDE cause changes this window's z-order mid-gesture (e.g. another
-# window closing), the frozen gesture planes are one z-step off until
-# release — accepted; window depth itself stays on the z_order grid. The
-# pointer's own plane is live-derived and does not share this.
+# Frozen at grab time so the window can't drift in depth. Accepted residual: an
+# OUTSIDE z-order change mid-gesture (e.g. another window closing) leaves the
+# frozen planes one z-step off until release, while window depth itself stays on
+# the z_order grid.
 var _drag_plane  := Plane()
 var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as needed
 @export var follow_speed: float = 30.0
@@ -57,11 +60,9 @@ var PIXELS_PER_UNIT := 150.0
 var HEADER_PIXELS_PER_UNIT := 150.0
 
 # Live-resize resolution throttle. Reallocating a render target also relays out
-# the 2D scene inside it, so committing every frame of a drag is both a hitch
-# risk and visible re-wrap. Between commits the targets lag the quads and the
-# texture is scaled by content_size / _res_basis, which reads as stretched text.
-# MAX_STRETCH bounds that and does the real saving; the interval is only a
-# ceiling so a fast drag cannot turn into a per-frame reallocation.
+# the 2D scene inside it, so committing every frame of a drag risks both a hitch
+# and a visible re-wrap. MAX_STRETCH does the real saving by bounding how far the
+# targets may lag the quads; the interval is only a ceiling on commit rate.
 const MAX_STRETCH := 0.03
 const MIN_COMMIT_INTERVAL := 1.0 / 15.0
 # Content size the current render targets were allocated for
@@ -69,11 +70,6 @@ var _res_basis := Vector2.ZERO
 var _res_pending := false
 var _since_commit := 0.0
 
-# NOTE: Gesture code uses global_position while apply_z_order sets local
-# position — these agree as long as the WindowManager stays unrotated and
-# unscaled. A RemoteTransform3D (root.tscn) drives it in position only, so it is
-# translated by locomotion but never rotated/scaled; the per-axis translation is
-# safe for the mixed local-z / global-xy writes below.
 func _ready() -> void:
 	var window_header: SWindowHeader = header_3d.get_scene_instance()
 	window_header.close_pressed.connect(close)
@@ -98,12 +94,10 @@ func _ready() -> void:
 	_apply_size(content_size)
 
 
-## Invoked when a pointer event on the window is detected
+## Focuses the window on any press, whichever surface the pointer hit.
 func _on_pointer_event(event: XRToolsPointerEvent):
-	if event.event_type == XRToolsPointerEvent.Type.PRESSED:  # Focus this window when "pressed"
-		# print("(before focus) [%s] z=%.5f" % [name, global_position.z])
+	if event.event_type == XRToolsPointerEvent.Type.PRESSED:
 		focus()
-		# print("(after focus) [%s] z=%.5f" % [name, global_position.z])
 
 
 func _on_header_pointer_event(event: XRToolsPointerEvent):
@@ -120,10 +114,9 @@ func _on_header_pointer_event(event: XRToolsPointerEvent):
 			pass
 
 
-## Re-intersects the pointer ray against the frozen gesture plane.
-## Returns the on-plane hit as a Vector3, or null when the ray misses the
-## plane this frame (caller should skip the frame). Compare with `!= null`,
-## not truthiness — Vector3.ZERO is falsy.
+## Intersects the pointer that raised `event` with `plane`. Returns the hit as a
+## Vector3, or null when the ray misses the plane this frame. Compare the result
+## with `!= null`, not truthiness — Vector3.ZERO is falsy.
 func _resolve_pointer_hit(event: XRToolsPointerEvent, plane: Plane) -> Variant:
 	var hand := event.pointer as HandPointer
 	if not hand:
@@ -143,22 +136,23 @@ func set_content(new_content: PackedScene) -> void:
 	content = new_content
 
 
-## Sets this window as focused
+## Requests focus for this window; the window manager performs the reorder.
 func focus() -> void:
 	on_focused.emit(self)
-	
-	
+
+
 ## Sets whether input events will be directed to this window
 func set_input_enabled(enabled: bool) -> void:
 	content_3d.input_keyboard = enabled
 	content_3d.input_gamepad = enabled
 
-## Updates the window's depth based on its z-order
+## Places the window at the depth its z_order calls for, leaving XY untouched.
 func apply_z_order() -> void:
-	# depth comes exclusively from z_order; XY is left untouched
+	# Derived from z_order alone, never from the current position, so repeated
+	# reorders cannot let depth drift off the Z_STEP grid
 	position.z = LAYER_ORIGIN_Z + z_order * Z_STEP
 
-## Visual feedback when the current window becomes the focused window
+## Dims the header while the window is not the focused one.
 func set_focused_visual(is_focused: bool) -> void:
 	var mat: StandardMaterial3D = $Header/Screen.material_override as StandardMaterial3D
 	if not mat:
@@ -168,11 +162,13 @@ func set_focused_visual(is_focused: bool) -> void:
 	else:
 		mat.albedo_color = Color(0.6, 0.6, 0.6, 1.0)
 
-## Retrieves the plane aligned with the window
+## The window's facing plane at its current depth. Assumes the window is
+## XY-axis-aligned.
 func _get_plane() -> Plane:
-	return Plane(Vector3(0, 0, 1), global_position)  # NOTE: Assumes window XY-axis-aligned
+	return Plane(Vector3(0, 0, 1), global_position)
 
-## Called when the user grabs the header
+## Starts a header drag from the grab described by `event`. No-op when the
+## pointer ray misses the window's plane.
 func start_drag(event: XRToolsPointerEvent) -> void:
 	# Focus first: it can raise the window by n*Z_STEP, so the gesture plane
 	# must be frozen at the NEW depth. The baseline is then resolved against
@@ -190,7 +186,8 @@ func start_drag(event: XRToolsPointerEvent) -> void:
 	set_process(true)
 	print("[%s] drag start z=%.5f" % [name, global_position.z])
 
-## Called whenever the pointer moves while dragging
+## Retargets the in-flight drag to `hit_world`, clamped to world bounds. No-op
+## when no drag is in flight.
 func update_drag(hit_world: Vector3) -> void:
 	if not _dragging:
 		return
@@ -211,20 +208,21 @@ func _process(delta: float) -> void:
 	global_position.x = next.x
 	global_position.y = next.y
 
-# Called when the user releases controller
+## Ends the drag, leaving the window wherever it settled.
 func stop_drag() -> void:
 	_dragging = false
 	# The other gesture may still need the tick
 	set_process(_resizing)
 	print("[%s] drag end z=%.5f" % [name, global_position.z])
 
-## Keeps the window within world bounds
+## `pos` clamped into world_bounds on X and Y; Z is passed through untouched.
 func _clamp_to_bounds(pos: Vector3) -> Vector3:
 	pos.x = clamp(pos.x, world_bounds.position.x, world_bounds.end.x)
 	pos.y = clamp(pos.y, world_bounds.position.y, world_bounds.end.y)
 	return pos
 
-## Called when user grabs a resize handle
+## Starts a resize on `handle` ("L", "R", "B", "BL" or "BR") from the grab
+## described by `event`. No-op when the pointer ray misses the window's plane.
 func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	# Freeze the gesture plane after focusing (focus can raise the window by
 	# n*Z_STEP) and resolve the baseline against that same plane, so the
@@ -243,7 +241,8 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	print("[%s] resize start z=%.5f" % [name, global_position.z])
 
 
-## Called every frame while resize handle is held
+## Resizes the window to follow the pointer at `hit_world`, keeping the edges
+## the grabbed handle does not own pinned. No-op when no resize is in flight.
 func update_resize(hit_world: Vector3) -> void:
 	if not _resizing:
 		return
@@ -288,7 +287,7 @@ func update_resize(hit_world: Vector3) -> void:
 	_apply_size(clamped, true)
 
 
-## Called when user releases resize handle
+## Ends the resize and settles the render resolutions at the final size.
 func stop_resize() -> void:
 	_resizing      = false
 	_resize_handle = ""
@@ -343,10 +342,9 @@ func _commit_resolution() -> void:
 ## Asks `surface` to redraw its viewport once on the coming frame.
 func _request_redraw(surface: XRToolsViewport2DIn3D) -> void:
 	var viewport := surface.get_node("Viewport") as SubViewport
-	# Assigning re-arms the request even when the property already reads
-	# UPDATE_ONCE: the renderer resets its own copy after drawing and never
-	# writes back here, so skipping the write when the value looks unchanged
-	# would skip the redraw
+	# Assign unconditionally: the renderer resets its own copy after drawing and
+	# never writes back here, so skipping the write when the property already
+	# reads UPDATE_ONCE would skip the redraw
 	viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
@@ -393,13 +391,13 @@ func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> 
 		_:
 			pass
 
-## Invoked on content pointer event
+## Routes content-surface events, starting a resize when the press lands inside
+## an edge band and ignoring it otherwise.
 func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
 	match event.event_type:
 		XRToolsPointerEvent.Type.PRESSED:
 			var handle = _get_handle_from_world_pos(event.position)
 			if handle != "":
-				# pointer is near an edge — start resize
 				start_resize(handle, event)
 		XRToolsPointerEvent.Type.MOVED:
 			if _resizing:
@@ -412,14 +410,13 @@ func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
 		_:
 			pass
 
-## Determines resize handle from pointer world position
+## Resize handle covering `world_pos` ("L", "R", "B", "BL" or "BR"), or "" when
+## the position is not inside any edge band.
 func _get_handle_from_world_pos(world_pos: Vector3) -> String:
-	# convert world position to local position relative to content
 	var local = content_3d.to_local(world_pos)
 	var hw := content_size.x / 2.0
 	var hh := content_size.y / 2.0
-	# edge threshold — how close to the edge counts as a resize handle
-	var edge := 0.12
+	var edge := 0.12  # how close to an edge still counts as a handle, world units
 
 	var on_left   : bool = local.x < -hw + edge
 	var on_right  : bool = local.x >  hw - edge
@@ -433,8 +430,9 @@ func _get_handle_from_world_pos(world_pos: Vector3) -> String:
 	return ""
 
 
+## Rebuilds the resize handle areas at the current content size, discarding any
+## previous set.
 func _rebuild_resize_handles() -> void:
-	# remove old handles first
 	var old = get_node_or_null("ResizeHandles")
 	if old:
 		remove_child(old)
@@ -448,7 +446,6 @@ func _rebuild_resize_handles() -> void:
 	var hh := content_size.y / 2.0
 	var t  := 0.08  # handle size in world units
 
-	# handle id -> local position
 	var handles := {
 		"L":  Vector3(-hw,   0, 0.01),
 		"R":  Vector3( hw,   0, 0.01),
@@ -475,9 +472,9 @@ func _rebuild_resize_handles() -> void:
 
 
 
-## Self-cleaning function that destroys window content
+## Closes the window: emits on_closed and frees the node.
 func close() -> void:
-	# cancel any in-flight gesture so a missed RELEASED can't leave stale state
+	# Cancel any in-flight gesture so a missed RELEASED can't leave stale state
 	_dragging = false
 	_resizing = false
 	set_process(false)
