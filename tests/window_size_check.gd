@@ -33,8 +33,11 @@ func _initialize() -> void:
 	# --- live phase: screens track every frame, resolution waits for the clock ---
 	var before_content_res: Vector2 = win.content_3d.viewport_size
 	var before_header_res: Vector2 = win.header_3d.viewport_size
-	win.start_resize("R", _press_at(win, win.global_position))
-	win.update_resize(win.global_position + Vector3(0.4, 0, 0))
+	# Held fixed for the whole gesture: the window itself slides as it resizes, so
+	# re-reading global_position each frame would compound the drag
+	var origin: Vector3 = win.global_position
+	win.start_resize("R", _press_at(win, origin))
+	win.update_resize(origin + Vector3(0.4, 0, 0))
 	win._process(0.001)
 
 	print("[mid-gesture, inside the commit interval]")
@@ -79,7 +82,7 @@ func _initialize() -> void:
 	# --- a nudge below the tolerance must not earn a reallocation ---
 	var settled_res: Vector2 = win.content_3d.viewport_size
 	cvp.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	win.update_resize(win.global_position + Vector3(0.41, 0, 0))
+	win.update_resize(origin + Vector3(0.41, 0, 0))
 	win._process(1.0)
 
 	print("[sub-tolerance nudge]")
@@ -129,6 +132,20 @@ func _initialize() -> void:
 	print("[clamped to MAX_CONTENT_SIZE]")
 	_check("content width clamped", absf(win.content_size.x - SWindow.MAX_CONTENT_SIZE.x) < EPS,
 			str(win.content_size))
+	_check_invariant(win)
+
+	# --- each handle must pin the edges it does not own ---
+	# Re-seeded so every drag below stays clear of the clamps, which suppress the
+	# position shift and would pin both edges for the wrong reason
+	win._apply_size(Vector2(1.5, 0.75))
+	await process_frame
+
+	print("[edge anchoring]")
+	_check_anchors(win, "R", Vector3(0.3, 0, 0), ["left", "top", "bottom"], ["right"])
+	_check_anchors(win, "L", Vector3(-0.3, 0, 0), ["right", "top", "bottom"], ["left"])
+	_check_anchors(win, "B", Vector3(0, -0.2, 0), ["left", "right", "top"], ["bottom"])
+	_check_anchors(win, "BR", Vector3(0.3, -0.2, 0), ["left", "top"], ["right", "bottom"])
+	_check_anchors(win, "BL", Vector3(-0.3, -0.2, 0), ["right", "top"], ["left", "bottom"])
 	_check_invariant(win)
 
 	print("")
@@ -236,13 +253,14 @@ func _check_resolutions_agree(win: SWindow) -> void:
 ## the result does not depend on the host's frame rate. Reports the worst stretch
 ## seen and how many times the render target was reallocated.
 func _drag(win: SWindow, grow: float, seconds: float, frames: int) -> Dictionary:
-	win.start_resize("R", _press_at(win, win.global_position))
+	var origin: Vector3 = win.global_position
+	win.start_resize("R", _press_at(win, origin))
 	var dt := seconds / float(frames)
 	var last_res: Vector2 = win.content_3d.viewport_size
 	var commits := 0
 	var worst := 0.0
 	for i in frames:
-		win.update_resize(win.global_position + Vector3(grow * float(i + 1) / frames, 0, 0))
+		win.update_resize(origin + Vector3(grow * float(i + 1) / frames, 0, 0))
 		win._process(dt)
 		worst = maxf(worst, _stretch(win))
 		if not win.content_3d.viewport_size.is_equal_approx(last_res):
@@ -265,6 +283,37 @@ func _expected_res(size: Vector2, ppu: float) -> Vector2:
 
 # Null pointer makes _resolve_pointer_hit project onto the frozen gesture
 # plane, which lets the test drive a resize without a live HandPointer.
+## Runs one whole resize gesture on `handle`, dragging the grab point by `move`,
+## then asserts the edges named in `pinned` sit exactly where they did before and
+## those in `moved` actually travelled.
+func _check_anchors(win: SWindow, handle: String, move: Vector3, pinned: Array,
+		moved: Array) -> void:
+	var before := _edges(win)
+	var origin: Vector3 = win.global_position
+	win.start_resize(handle, _press_at(win, origin))
+	win.update_resize(origin + move)
+	win.stop_resize()
+
+	var after := _edges(win)
+	for edge in pinned:
+		_check("%s pins the %s edge" % [handle, edge], absf(after[edge] - before[edge]) < EPS,
+				"%.5f -> %.5f" % [before[edge], after[edge]])
+	for edge in moved:
+		_check("%s moves the %s edge" % [handle, edge], absf(after[edge] - before[edge]) > EPS,
+				"%.5f -> %.5f" % [before[edge], after[edge]])
+
+
+## World-space position of each side of the content screen.
+func _edges(win: SWindow) -> Dictionary:
+	var centre: Vector3 = win.content_3d.global_position
+	return {
+		"left": centre.x - win.content_size.x / 2.0,
+		"right": centre.x + win.content_size.x / 2.0,
+		"top": centre.y + win.content_size.y / 2.0,
+		"bottom": centre.y - win.content_size.y / 2.0,
+	}
+
+
 func _press_at(win: SWindow, world_pos: Vector3) -> XRToolsPointerEvent:
 	return XRToolsPointerEvent.new(
 		XRToolsPointerEvent.Type.PRESSED, null, win, world_pos, world_pos)

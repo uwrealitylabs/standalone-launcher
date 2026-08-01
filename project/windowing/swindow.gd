@@ -255,8 +255,12 @@ func update_resize(hit_world: Vector3) -> void:
 	var new_size := _resize_start_size
 	var pos_shift := Vector2.ZERO
 
+	# The screens are centred on the window, so a size change alone walks both
+	# edges outward by half of it. Every handle therefore also shifts the window
+	# by that same half, which is what pins the edge opposite the one grabbed.
 	if _resize_handle == "R":
 		new_size.x += delta.x
+		pos_shift.x = delta.x / 2.0
 	elif _resize_handle == "L":
 		new_size.x -= delta.x
 		pos_shift.x = delta.x / 2.0
@@ -266,7 +270,7 @@ func update_resize(hit_world: Vector3) -> void:
 	elif _resize_handle == "BR":
 		new_size.x += delta.x
 		new_size.y -= delta.y
-		pos_shift.y = delta.y / 2.0
+		pos_shift = Vector2(delta.x / 2.0, delta.y / 2.0)
 	elif _resize_handle == "BL":
 		new_size.x -= delta.x
 		new_size.y -= delta.y

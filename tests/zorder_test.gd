@@ -73,10 +73,13 @@ func _initialize() -> void:
 		wm.windows_list == before)
 
 	# --- resize w3, change stack mid-resize (the old shared-z repro) ---
-	w3.start_resize("R", _press_at(w3, w3.global_position + Vector3(0.75, 0, 0)))
-	w3.update_resize(w3.global_position + Vector3(0.9, 0, 0))
+	# Pointer positions are anchored to where the grab started: resizing slides
+	# the window, so re-reading global_position mid-gesture would compound
+	var w3_origin: Vector3 = w3.global_position
+	w3.start_resize("R", _press_at(w3, w3_origin + Vector3(0.75, 0, 0)))
+	w3.update_resize(w3_origin + Vector3(0.9, 0, 0))
 	a.focus()
-	w3.update_resize(w3.global_position + Vector3(1.0, 0, 0))
+	w3.update_resize(w3_origin + Vector3(1.0, 0, 0))
 	w3.stop_resize()
 	await process_frame
 	_check("all on grid after mid-resize focus change", wins.all(_on_grid))
