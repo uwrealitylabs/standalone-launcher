@@ -26,24 +26,47 @@ func _initialize() -> void:
 			absf(win.HEADER_PIXELS_PER_UNIT - 399.93 / 1.5) < 0.1, str(win.HEADER_PIXELS_PER_UNIT))
 	_check_invariant(win)
 
-	# --- live phase of a resize: screens track, resolutions stay deferred ---
+	# --- live phase: screens track every frame, resolution waits for the clock ---
 	var before_content_res: Vector2 = win.content_3d.viewport_size
 	var before_header_res: Vector2 = win.header_3d.viewport_size
-	win.start_resize("R", _press_at(win, win.global_position + Vector3(0.75, 0, 0)))
-	win.update_resize(win.global_position + Vector3(1.15, 0, 0))
-	await process_frame
+	win.start_resize("R", _press_at(win, win.global_position))
+	win.update_resize(win.global_position + Vector3(0.4, 0, 0))
+	win._process(0.001)
 
-	print("[mid-gesture]")
+	print("[mid-gesture, inside the commit interval]")
 	_check("content grew to 1.9 wide", absf(win.content_size.x - 1.9) < EPS, str(win.content_size))
 	_check_screens_agree(win)
-	_check("content resolution still deferred",
+	_check("content resolution waits for the interval",
 			win.content_3d.viewport_size.is_equal_approx(before_content_res),
 			str(win.content_3d.viewport_size))
-	_check("header resolution still deferred",
+	_check("header resolution waits for the interval",
 			win.header_3d.viewport_size.is_equal_approx(before_header_res),
 			str(win.header_3d.viewport_size))
 
-	# --- release: everything settles, including resolutions ---
+	# --- pointer stops moving but never releases: the clock must still catch up ---
+	win._process(SWindow.MIN_COMMIT_INTERVAL)
+
+	print("[held still past the interval]")
+	_check("content resolution caught up without a release",
+			not win.content_3d.viewport_size.is_equal_approx(before_content_res),
+			str(win.content_3d.viewport_size))
+	_check("header resolution caught up without a release",
+			not win.header_3d.viewport_size.is_equal_approx(before_header_res),
+			str(win.header_3d.viewport_size))
+	_check_resolutions_agree(win)
+	_check("no stretch left after a commit", _stretch(win) < EPS, "%.4f" % _stretch(win))
+
+	# --- a nudge below the tolerance must not earn a reallocation ---
+	var settled_res: Vector2 = win.content_3d.viewport_size
+	win.update_resize(win.global_position + Vector3(0.41, 0, 0))
+	win._process(1.0)
+
+	print("[sub-tolerance nudge]")
+	_check("0.5% growth does not earn a reallocation",
+			win.content_3d.viewport_size.is_equal_approx(settled_res),
+			str(win.content_3d.viewport_size))
+
+	# --- release: everything settles exactly, whatever the throttle last did ---
 	win.stop_resize()
 	await process_frame
 
@@ -51,6 +74,26 @@ func _initialize() -> void:
 	_check("content resolution updated",
 			not win.content_3d.viewport_size.is_equal_approx(before_content_res),
 			str(win.content_3d.viewport_size))
+	_check_invariant(win)
+
+	# --- slow drag: the interval never binds, so the stretch gate governs ---
+	print("[slow drag: stretch gate governs]")
+	var slow := _drag(win, -0.3, 3.0, 270)
+	print("       worst stretch %.2f%%, %d commit(s) over 270 frames"
+			% [slow.stretch * 100.0, slow.commits])
+	_check("stretch stays within tolerance",
+			slow.stretch <= SWindow.MAX_STRETCH + 0.005, "%.4f" % slow.stretch)
+	_check("gate still allows some commits", slow.commits > 0, "%d" % slow.commits)
+	_check_invariant(win)
+
+	# --- fast drag: the stretch gate saturates, so the interval caps the cost ---
+	print("[fast drag: interval gate governs]")
+	var fast := _drag(win, 1.3, 0.5, 45)
+	var ceiling := int(ceil(0.5 / SWindow.MIN_COMMIT_INTERVAL)) + 1
+	print("       worst stretch %.2f%%, %d commit(s) over 45 frames"
+			% [fast.stretch * 100.0, fast.commits])
+	_check("commits stay under the rate ceiling", fast.commits <= ceiling,
+			"%d commits, ceiling %d" % [fast.commits, ceiling])
 	_check_invariant(win)
 
 	# --- clamping ---
@@ -162,6 +205,34 @@ func _check_resolutions_agree(win: SWindow) -> void:
 	_check("content aspect matches screen aspect",
 			absf(want_content.x / want_content.y - content.x / content.y) < 0.01,
 			"%.4f vs %.4f" % [want_content.x / want_content.y, content.x / content.y])
+
+
+## Drives a whole resize gesture that changes the content width by `grow` world
+## units over `seconds` of simulated time, ticking the throttle clock by hand so
+## the result does not depend on the host's frame rate. Reports the worst stretch
+## seen and how many times the render target was reallocated.
+func _drag(win: SWindow, grow: float, seconds: float, frames: int) -> Dictionary:
+	win.start_resize("R", _press_at(win, win.global_position))
+	var dt := seconds / float(frames)
+	var last_res: Vector2 = win.content_3d.viewport_size
+	var commits := 0
+	var worst := 0.0
+	for i in frames:
+		win.update_resize(win.global_position + Vector3(grow * float(i + 1) / frames, 0, 0))
+		win._process(dt)
+		worst = maxf(worst, _stretch(win))
+		if not win.content_3d.viewport_size.is_equal_approx(last_res):
+			commits += 1
+			last_res = win.content_3d.viewport_size
+	win.stop_resize()
+	return {"stretch": worst, "commits": commits}
+
+
+## Worst-axis discrepancy between the size the screen now measures and the size
+## its render target was allocated for — what shows up as stretched text.
+func _stretch(win: SWindow) -> float:
+	return maxf(absf(win.content_size.x / win._res_basis.x - 1.0),
+			absf(win.content_size.y / win._res_basis.y - 1.0))
 
 
 func _expected_res(size: Vector2, ppu: float) -> Vector2:

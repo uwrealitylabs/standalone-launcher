@@ -56,6 +56,19 @@ const MAX_CONTENT_SIZE := Vector2(3.0, 2.5)
 var PIXELS_PER_UNIT := 150.0
 var HEADER_PIXELS_PER_UNIT := 150.0
 
+# Live-resize resolution throttle. Reallocating a render target also relays out
+# the 2D scene inside it, so committing every frame of a drag is both a hitch
+# risk and visible re-wrap. Between commits the targets lag the quads and the
+# texture is scaled by content_size / _res_basis, which reads as stretched text.
+# MAX_STRETCH bounds that and does the real saving; the interval is only a
+# ceiling so a fast drag cannot turn into a per-frame reallocation.
+const MAX_STRETCH := 0.03
+const MIN_COMMIT_INTERVAL := 1.0 / 15.0
+# Content size the current render targets were allocated for
+var _res_basis := Vector2.ZERO
+var _res_pending := false
+var _since_commit := 0.0
+
 # NOTE: Gesture code uses global_position while apply_z_order sets local
 # position — these agree as long as the WindowManager stays unrotated and
 # unscaled. A RemoteTransform3D (root.tscn) drives it in position only, so it is
@@ -184,6 +197,11 @@ func update_drag(hit_world: Vector3) -> void:
 	_drag_target = _clamp_to_bounds(hit_world + _drag_offset)
 
 func _process(delta: float) -> void:
+	# Driven on a clock, not from update_resize, so a drag that stops moving
+	# without releasing still catches its resolution up
+	if _resizing:
+		_tick_resolution(delta)
+
 	if not _dragging:
 		return
 
@@ -196,7 +214,8 @@ func _process(delta: float) -> void:
 # Called when the user releases controller
 func stop_drag() -> void:
 	_dragging = false
-	set_process(false)
+	# The other gesture may still need the tick
+	set_process(_resizing)
 	print("[%s] drag end z=%.5f" % [name, global_position.z])
 
 ## Keeps the window within world bounds
@@ -220,6 +239,7 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	_resize_start_hit  = hit
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
+	set_process(true)
 	print("[%s] resize start z=%.5f" % [name, global_position.z])
 
 
@@ -268,7 +288,8 @@ func update_resize(hit_world: Vector3) -> void:
 func stop_resize() -> void:
 	_resizing      = false
 	_resize_handle = ""
-	# Gesture over: pick up the work that was too expensive to do per frame
+	set_process(_dragging)
+	# Gesture over: settle exactly, whatever the throttle last committed
 	_apply_size(content_size)
 	print("[%s] resize stops z=%.5f" % [name, global_position.z])
 
@@ -290,13 +311,45 @@ func _apply_size(new_size: Vector2, live: bool = false) -> void:
 	header_3d.position.y = (content_size.y + HEADER_HEIGHT) / 2.0
 
 	if live:
+		_res_pending = true
 		return
 
-	# Reallocating a render target and rebuilding the handle nodes are both too
-	# costly to repeat every frame of a drag.
+	_commit_resolution()
+	# Rebuilding the handle nodes is too costly to repeat every frame of a drag
+	_rebuild_resize_handles()
+
+
+## Reallocates both render targets so each surface renders at its authored
+## pixel density for the current content size.
+func _commit_resolution() -> void:
+	var header_size := Vector2(content_size.x, HEADER_HEIGHT)
 	content_3d.viewport_size = _viewport_resolution(content_size, PIXELS_PER_UNIT)
 	header_3d.viewport_size = _viewport_resolution(header_size, HEADER_PIXELS_PER_UNIT)
-	_rebuild_resize_handles()
+	_res_basis = content_size
+	_res_pending = false
+	_since_commit = 0.0
+
+
+## Advances the throttle clock and commits a pending resolution once both the
+## stretch and interval gates allow it.
+func _tick_resolution(delta: float) -> void:
+	_since_commit += delta
+	if not _res_pending or _since_commit < MIN_COMMIT_INTERVAL:
+		return
+	# Below the tolerance a reallocation would cost more than the blur it fixes,
+	# so the update stays pending until the drag earns it or stop_resize settles it
+	if not _stretch_exceeded():
+		return
+	_commit_resolution()
+
+
+## True when either axis of the render targets is more than MAX_STRETCH away
+## from the size it is currently being displayed at.
+func _stretch_exceeded() -> bool:
+	if _res_basis.x <= 0.0 or _res_basis.y <= 0.0:
+		return true
+	return absf(content_size.x / _res_basis.x - 1.0) > MAX_STRETCH \
+			or absf(content_size.y / _res_basis.y - 1.0) > MAX_STRETCH
 
 
 ## Render resolution for a screen of `size` world units at `ppu` pixels per
