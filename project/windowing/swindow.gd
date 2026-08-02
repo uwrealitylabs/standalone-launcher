@@ -49,6 +49,30 @@ var _resize_start_size := Vector2.ZERO
 var _resize_start_pos  := Vector3.ZERO
 var _resize_plane      := Plane()
 
+# Grab bands straddling the content edges, keyed by handle id
+var _resize_handles := {}
+# Thickness tracks the window so a small one is not mostly handle, and stops
+# growing once the band is comfortably wide enough to hit. Staying under half
+# keeps the spans in _layout_resize_handles positive at MIN_CONTENT_SIZE.
+const HANDLE_THICKNESS_RATIO := 0.15
+const HANDLE_MAX_THICKNESS := 0.12
+# Depth budget in window-local z, viewer on the +z side. A ray reports the
+# nearest front face it enters, so the order of the faces is the order of picks:
+#
+#   -0.020 .. 0.000  own screen    XRToolsViewport2DIn3D hangs the box behind
+#                                  the quad, so its front face is the plane at 0
+#    0.000 .. 0.020  own handles   HANDLE_Z +/- HANDLE_DEPTH / 2
+#    0.020 .. 0.030  empty
+#    0.030 .. 0.050  next window's screen, starting at Z_STEP - SCREEN_DEPTH
+#    0.050 .. 0.070  next window's handles
+#
+# Nothing overlaps; good.
+const SCREEN_DEPTH := 0.02
+const HANDLE_DEPTH := 0.02
+const HANDLE_Z := 0.01
+# Must intersect the controller raycasts' collision_mask in root.tscn
+const HANDLE_COLLISION_LAYER := 4194304
+
 # Size of the actual content, not the header. The literal is a placeholder.
 var content_size := Vector2(1.5, 0.75)
 const HEADER_HEIGHT  : float = 0.08     # fixed header height in world units
@@ -80,7 +104,6 @@ func _ready() -> void:
 	header_3d.pointer_event.connect(_on_pointer_event)
 	header_3d.pointer_event.connect(_on_header_pointer_event)
 	content_3d.pointer_event.connect(_on_pointer_event)
-	content_3d.pointer_event.connect(_on_content_pointer_event)
 
 	# Seed from the authored scene, not from the script defaults above, so the
 	# two cannot silently disagree.
@@ -91,6 +114,7 @@ func _ready() -> void:
 	if not XRUtils.is_openxr_active():
 		header_3d.enabled = true
 		content_3d.set_process_input(false)
+	_build_resize_handles()
 	_apply_size(content_size)
 
 
@@ -305,8 +329,8 @@ func stop_resize() -> void:
 ## Resizes the window's content to `new_size`, clamped to MIN/MAX_CONTENT_SIZE,
 ## and brings the header and both screens' geometry with it.
 ##
-## Sole writer of size state. `live` omits the render resolutions and the
-## resize handles; the caller must call again without it to settle them.
+## Sole writer of size state. `live` omits the render resolutions; the caller
+## must call again without it to settle them.
 func _apply_size(new_size: Vector2, live: bool = false) -> void:
 	content_size = new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
 	var header_size := Vector2(content_size.x, HEADER_HEIGHT)
@@ -317,14 +341,13 @@ func _apply_size(new_size: Vector2, live: bool = false) -> void:
 	header_3d.screen_size = header_size
 	# Header sits on top of the content; both are centred on the window
 	header_3d.position.y = (content_size.y + HEADER_HEIGHT) / 2.0
+	_layout_resize_handles()
 
 	if live:
 		_res_pending = true
 		return
 
 	_commit_resolution()
-	# Rebuilding the handle nodes is too costly to repeat every frame of a drag
-	_rebuild_resize_handles()
 
 
 ## Reallocates both render targets so each surface renders at its authored
@@ -396,85 +419,71 @@ func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> 
 		_:
 			pass
 
-## Routes content-surface events, starting a resize when the press lands inside
-## an edge band and ignoring it otherwise.
-func _on_content_pointer_event(event: XRToolsPointerEvent) -> void:
-	match event.event_type:
-		XRToolsPointerEvent.Type.PRESSED:
-			var handle = _get_handle_from_world_pos(event.position)
-			if handle != "":
-				start_resize(handle, event)
-		XRToolsPointerEvent.Type.MOVED:
-			if _resizing:
-				var hit = _resolve_pointer_hit(event, _resize_plane)
-				if hit != null:
-					update_resize(hit)
-		XRToolsPointerEvent.Type.RELEASED:
-			if _resizing:
-				stop_resize()
-		_:
-			pass
-
-## Resize handle covering `world_pos` ("L", "R", "B", "BL" or "BR"), or "" when
-## the position is not inside any edge band.
-func _get_handle_from_world_pos(world_pos: Vector3) -> String:
-	var local = content_3d.to_local(world_pos)
-	var hw := content_size.x / 2.0
-	var hh := content_size.y / 2.0
-	var edge := 0.12  # how close to an edge still counts as a handle, world units
-
-	var on_left   : bool = local.x < -hw + edge
-	var on_right  : bool = local.x >  hw - edge
-	var on_bottom : bool = local.y < -hh + edge
-
-	if on_bottom and on_left:  return "BL"
-	if on_bottom and on_right: return "BR"
-	if on_left:                return "L"
-	if on_right:               return "R"
-	if on_bottom:              return "B"
-	return ""
-
-
-## Rebuilds the resize handle areas at the current content size, discarding any
-## previous set.
-func _rebuild_resize_handles() -> void:
-	var old = get_node_or_null("ResizeHandles")
-	if old:
-		remove_child(old)
-		old.free()
-
-	var root  = Node3D.new()
+## Creates the five resize handle bodies under "ResizeHandles". Call once.
+func _build_resize_handles() -> void:
+	var root := Node3D.new()
 	root.name = "ResizeHandles"
 	add_child(root)
 
+	for handle_id in ["L", "R", "B", "BL", "BR"]:
+		var body := StaticBody3D.new()
+		body.name = "Handle" + handle_id
+		# The controller raycasts leave collide_with_areas off and test only
+		# their own mask, so a handle has to be a body on that layer to be hit
+		body.collision_layer = HANDLE_COLLISION_LAYER
+		body.collision_mask = 0
+		body.set_meta("handle_id", handle_id)
+
+		var col := CollisionShape3D.new()
+		col.shape = BoxShape3D.new()
+		body.add_child(col)
+
+		# HandPointer emits this on whichever collider its ray landed on
+		body.add_user_signal("pointer_event")
+		body.connect("pointer_event",
+				func(event: XRToolsPointerEvent) -> void:
+					_on_handle_pointer_event(handle_id, event))
+
+		root.add_child(body)
+		_resize_handles[handle_id] = body
+
+	_layout_resize_handles()
+
+
+## Sizes and positions the handles to straddle the current content edges.
+func _layout_resize_handles() -> void:
 	var hw := content_size.x / 2.0
 	var hh := content_size.y / 2.0
-	var t  := 0.08  # handle size in world units
+	var tx := minf(HANDLE_MAX_THICKNESS, content_size.x * HANDLE_THICKNESS_RATIO)
+	var ty := minf(HANDLE_MAX_THICKNESS, content_size.y * HANDLE_THICKNESS_RATIO)
 
-	var handles := {
-		"L":  Vector3(-hw,   0, 0.01),
-		"R":  Vector3( hw,   0, 0.01),
-		"BL": Vector3(-hw, -hh, 0.01),
-		"B":  Vector3(  0, -hh, 0.01),
-		"BR": Vector3( hw, -hh, 0.01),
-	}
+	# Each band is centred on its edge, so it reaches half its thickness outside
+	# the window and covers only half of it in content
+	var x_outer_l := -hw - tx / 2.0
+	var x_inner_l := -hw + tx / 2.0
+	var x_inner_r := hw - tx / 2.0
+	var x_outer_r := hw + tx / 2.0
+	var y_outer_b := -hh - ty / 2.0
+	var y_inner_b := -hh + ty / 2.0
 
-	for handle_id in handles:
-		var area  = Area3D.new()
-		var col   = CollisionShape3D.new()
-		var shape = BoxShape3D.new()
-		shape.size = Vector3(t, t, 0.05)
-		col.shape  = shape
-		area.add_child(col)
-		area.position  = handles[handle_id]
-		area.collision_layer = 0
-		area.set_meta("handle_id", handle_id)
-		if not area.has_user_signal("pointer_event"):
-			area.add_user_signal("pointer_event")
-		area.connect("pointer_event", func(event: XRToolsPointerEvent): _on_handle_pointer_event(handle_id, event))
-		root.add_child(area)
-		area.input_ray_pickable = true
+	# The corners take a whole band at each end of the border and the edges span
+	# exactly what is left, so the five tile it: no gap to fall through, and no
+	# overlap for a ray to have to resolve between equal depths. There is no top
+	# edge or top corner because the header owns that side.
+	_place_handle("BL", Vector2(x_outer_l, y_outer_b), Vector2(x_inner_l, y_inner_b))
+	_place_handle("BR", Vector2(x_inner_r, y_outer_b), Vector2(x_outer_r, y_inner_b))
+	_place_handle("B", Vector2(x_inner_l, y_outer_b), Vector2(x_inner_r, y_inner_b))
+	_place_handle("L", Vector2(x_outer_l, y_inner_b), Vector2(x_inner_l, hh))
+	_place_handle("R", Vector2(x_inner_r, y_inner_b), Vector2(x_outer_r, hh))
 
+
+## Covers the content-local rect from corner `lo` to corner `hi` with the handle
+## `handle_id`, at the depth all handles share.
+func _place_handle(handle_id: String, lo: Vector2, hi: Vector2) -> void:
+	var body: StaticBody3D = _resize_handles[handle_id]
+	body.position = Vector3((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, HANDLE_Z)
+	var col := body.get_child(0) as CollisionShape3D
+	(col.shape as BoxShape3D).size = Vector3(hi.x - lo.x, hi.y - lo.y, HANDLE_DEPTH)
 
 
 ## Closes the window: emits on_closed and frees the node.
