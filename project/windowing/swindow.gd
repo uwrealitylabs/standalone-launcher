@@ -252,38 +252,43 @@ func update_resize(hit_world: Vector3) -> void:
 		hit_world.y - _resize_start_hit.y
 	)
 	var new_size := _resize_start_size
-	var pos_shift := Vector2.ZERO
-
 	# The screens are centred on the window, so a size change alone walks both
 	# edges outward by half of it. Every handle therefore also shifts the window
 	# by that same half, which is what pins the edge opposite the one grabbed.
+	# This sign maps that size change to the shift's direction: +1 on an axis
+	# whose positive edge the handle owns.
+	var shift_sign := Vector2.ZERO
+
 	if _resize_handle == "R":
 		new_size.x += delta.x
-		pos_shift.x = delta.x / 2.0
+		shift_sign.x = 1.0
 	elif _resize_handle == "L":
 		new_size.x -= delta.x
-		pos_shift.x = delta.x / 2.0
+		shift_sign.x = -1.0
 	elif _resize_handle == "B":
 		new_size.y -= delta.y
-		pos_shift.y = delta.y / 2.0
+		shift_sign.y = -1.0
 	elif _resize_handle == "BR":
 		new_size.x += delta.x
 		new_size.y -= delta.y
-		pos_shift = Vector2(delta.x / 2.0, delta.y / 2.0)
+		shift_sign = Vector2(1.0, -1.0)
 	elif _resize_handle == "BL":
 		new_size.x -= delta.x
 		new_size.y -= delta.y
-		pos_shift = Vector2(delta.x / 2.0, delta.y / 2.0)
+		shift_sign = Vector2(-1.0, -1.0)
 
 	var clamped := new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
-	if clamped.is_equal_approx(new_size):
-		# Apply the shift in XY only; z stays owned by z_order so a stale
-		# _resize_start_pos.z can't leak back in after a mid-resize stack change.
-		# NOTE: Assumes window is unrotated (basis maps XY shift to world XY).
-		var shifted := _resize_start_pos + \
-			global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
-		global_position.x = shifted.x
-		global_position.y = shifted.y
+	# Measured against the size actually applied, not the pointer delta: past a
+	# clamp the pointer keeps moving while the size does not, and a shift still
+	# tracking the pointer would drag the pinned edge along with it.
+	var pos_shift := (clamped - _resize_start_size) * shift_sign / 2.0
+	# Apply the shift in XY only; z stays owned by z_order so a stale
+	# _resize_start_pos.z can't leak back in after a mid-resize stack change.
+	# NOTE: Assumes window is unrotated (basis maps XY shift to world XY).
+	var shifted := _resize_start_pos + \
+		global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
+	global_position.x = shifted.x
+	global_position.y = shifted.y
 	_apply_size(clamped, true)
 
 
