@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push supersedes whatever is still running for the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: '4.5'
+
+jobs:
+  tests:
+    name: Headless tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot editor
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-bin
+          key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
+
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+          url="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/${base}.zip"
+          mkdir -p ~/godot-bin
+          curl -fsSL -o /tmp/godot.zip "$url"
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          mv "/tmp/godot/${base}" ~/godot-bin/godot
+          chmod +x ~/godot-bin/godot
+
+      - name: Put Godot on PATH
+        run: echo "$HOME/godot-bin" >> "$GITHUB_PATH"
+
+      # .godot/ is gitignored, so a fresh checkout has no import cache and
+      # load() on any .tscn would fail until the assets are imported.
+      - name: Import assets
+        run: godot --headless --xr-mode off --import
+
+      # --xr-mode off: the runner has no OpenXR runtime, and initialization
+      # failure otherwise raises a modal alert that never gets dismissed.
+      - name: Run tests
+        run: |
+          set -uo pipefail
+          status=0
+          for test in tests/*.gd; do
+            name="$(basename "$test")"
+            echo "::group::$name"
+            if godot --headless --xr-mode off --script "res://$test" 2>&1 | tee "/tmp/$name.log"; then
+              # Some checks report a failure without changing the exit code.
+              if grep -q 'FAIL' "/tmp/$name.log"; then
+                echo "::error file=$test::$name reported failing checks"
+                status=1
+              fi
+            else
+              echo "::error file=$test::$name exited non-zero"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $status
