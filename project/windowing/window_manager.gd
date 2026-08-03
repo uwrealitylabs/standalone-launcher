@@ -1,8 +1,8 @@
-class_name WindowManager extends Node
+class_name WindowManager extends Node3D
 
-# Window creator and manager system
-# Instantiates new window using window.tscn template and stores it in an array
-# Manages z-ordering so focused windows appear in front
+# Creates windows from the window.tscn template and owns the stack order.
+# List position IS the z-order: the last element is frontmost and is the focused
+# window, so every reorder is a list move followed by _recalculate_z_order().
 
 @export_group("References")
 @export var window: PackedScene
@@ -12,17 +12,17 @@ var windows_list: Array[SWindow] = []
 var _focused: SWindow = null
 
 
+## Spawns a window at `pos` showing `content`, focused and frontmost.
 func create_window(pos: Vector3 = Vector3.ZERO, content: PackedScene = null) -> SWindow:
 	var win: SWindow = window.instantiate()
 	win.position = pos
 	add_child(win)
 	windows_list.append(win)
 
-	# connect signals
 	win.on_closed.connect(func(): _on_window_closed(win))
 	win.on_focused.connect(_on_window_focused)
 
-	# new window gets top z-order and focus
+	# Focusing also assigns the top z-order, so a new window needs nothing else
 	_on_window_focused(win)
 
 	if content:
@@ -51,59 +51,54 @@ func _on_key_pressed(event: InputEventKey) -> void:
 		_focused.send_input(event)
 
 
+## Closes `win`. Ignored when it is not in the stack.
 func destroy_window(win: SWindow) -> void:
 	if win in windows_list:
 		win.close()
 
 
-## Bring a specific window to the front of the stack
+## Brings `win` to the front of the stack. Ignored when it is not in the stack.
 func bring_to_front(win: SWindow) -> void:
 	if win not in windows_list:
 		return
 
-	# move this window to the end of the list
 	windows_list.erase(win)
 	windows_list.append(win)
-
-	# reassign z-order values based on list position
 	_recalculate_z_order()
 
 
-## Send a specific window to the back of the stack
+## Sends `win` to the back of the stack. Ignored when it is not in the stack.
 func send_to_back(win: SWindow) -> void:
 	if win not in windows_list:
 		return
 
-	# move this window to the beginning of the list
 	windows_list.erase(win)
 	windows_list.insert(0, win)
-
-	# reassign z-order values based on list position
 	_recalculate_z_order()
 
 
-## Move a window one level forward in the stack
+## Moves `win` one level forward. Ignored when it is not in the stack or is
+## already frontmost.
 func move_forward(win: SWindow) -> void:
 	if win not in windows_list:
 		return
 
 	var index = windows_list.find(win)
 	if index < windows_list.size() - 1:
-		# swap with the window above it
 		var other = windows_list[index + 1]
 		windows_list[index] = other
 		windows_list[index + 1] = win
 		_recalculate_z_order()
 
 
-## Move a window one level backward in the stack
+## Moves `win` one level backward. Ignored when it is not in the stack or is
+## already backmost.
 func move_backward(win: Node3D) -> void:
 	if win not in windows_list:
 		return
 
 	var index = windows_list.find(win)
 	if index > 0:
-		# swap with the window below it
 		var other = windows_list[index - 1]
 		windows_list[index] = other
 		windows_list[index - 1] = win
@@ -115,7 +110,8 @@ func get_focused_window() -> SWindow:
 	return _focused
 
 
-## Recalculate z-order for all windows based on their position in the list
+## Reassigns every window's z-order from its list position and updates the
+## focused-window highlight to match.
 func _recalculate_z_order() -> void:
 	var top_index = windows_list.size() - 1
 	for i in windows_list.size():
@@ -126,7 +122,7 @@ func _recalculate_z_order() -> void:
 			win.set_focused_visual(i == top_index)
 
 
-# Remove window from window manager list and recalculate z-order
+## Drops a closed window from the stack and promotes the next frontmost one.
 func _on_window_closed(win: Node3D) -> void:
 	print("removed from window list")
 	windows_list.erase(win)
@@ -138,10 +134,11 @@ func _on_window_closed(win: Node3D) -> void:
 		_on_window_focused(windows_list[-1])
 
 
-# Handle window focus request
+## Focuses `win`, bringing it to the front and routing input to it. No-op when
+## it is already the focused window.
 func _on_window_focused(win: SWindow) -> void:
-	# idempotent: re-pressing the focused window must not reshuffle the stack
-	# (a mid-drag recalculation is what used to knock depth off the grid)
+	# Idempotent so re-pressing the focused window cannot reshuffle the stack
+	# mid-gesture, which is what used to knock depth off the Z_STEP grid
 	if win == _focused:
 		return
 
@@ -154,7 +151,7 @@ func _on_window_focused(win: SWindow) -> void:
 
 
 func _ready() -> void:
-	# TESTING
+	# TEMP: hardcoded startup windows, pending a real session/launcher flow
 	var win1: SWindow = create_window(Vector3(-0.3, 1.5, -2.0))
 	create_window(Vector3(0.3, 1.5, -2.0), load("res://project/shell/terminal_ui.tscn"))
 	

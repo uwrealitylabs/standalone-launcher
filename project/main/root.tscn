@@ -97,8 +97,8 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2872815, 0)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.155, 0)
 
 [node name="XRToolsMovementDirect" parent="XROrigin3D/XRController3D_left" index="0"]
-strafe = false
-enabled = false
+strafe = true
+enabled = true
 
 [node name="RayCast3D" type="RayCast3D" parent="XROrigin3D/XRController3D_left"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.02, 0.05, -0.1)
@@ -137,6 +137,12 @@ collision_layer = 524289
 
 [node name="Environment" parent="." instance=ExtResource("4_5l8kh")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.68150544, 0)
+
+[node name="WindowFollow" type="RemoteTransform3D" parent="XROrigin3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.0, 0)
+remote_path = NodePath("../../WindowManager")
+update_rotation = false
+update_scale = false
 
 [node name="WindowManager" parent="." instance=ExtResource("8_41lny")]
 

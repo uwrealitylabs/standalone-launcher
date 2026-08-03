@@ -124,7 +124,6 @@ func _process_tap(pinch_value: float):
 		_locked_target = _current_target
 		var hit = _locked_plane_hit()
 		if hit != null:
-			# print("[hand_pointer] PRESSED hit z=%.5f" % hit.z)
 			_send_xr_event(XRToolsPointerEvent.Type.PRESSED, _locked_target, hit)
 			if _debounce_timer <= 0.0 and _locked_target:
 				pointer_activated.emit(_locked_target, hit)
@@ -134,13 +133,11 @@ func _process_tap(pinch_value: float):
 	elif is_pinching and _was_pinching:
 		var hit = _locked_plane_hit()
 		if hit != null:
-			# print("[hand_pointer] MOVED hit z=%.5f" % hit.z)
 			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _locked_target, hit)
 
 	elif not is_pinching and _was_pinching:
 		var hit = _locked_plane_hit()
 		if hit != null:
-			# print("[hand_pointer] RELEASED hit z=%.5f" % hit.z)
 			_send_xr_event(XRToolsPointerEvent.Type.RELEASED, _locked_target, hit)
 		_locked_target = null
 
@@ -149,16 +146,16 @@ func _process_tap(pinch_value: float):
 
 ## Intersects the pointer ray with the locked target's facing plane. Returns
 ## null when there is no locked target or the ray misses the plane this frame.
-## The plane is derived from the target's LIVE transform on every call, so a
-## depth change mid-gesture (e.g. focus raising the window's z-order) moves
-## the plane with it instead of leaving events on a stale depth. This is
-## feedback-safe: gestures move windows in X/Y only while the plane depends
-## only on the target's Z, which is owned by z-order.
 func _locked_plane_hit() -> Variant:
 	if not is_instance_valid(_locked_target):
 		return null
 	if not _locked_target is Node3D:
 		return null
+	# Derive the plane from the target's LIVE transform every call so a
+	# mid-gesture depth change (e.g. focus raising z-order) moves the plane with
+	# it instead of leaving events on a stale depth. Feedback-safe: gestures
+	# move windows in X/Y only, while the plane depends only on the target's Z
+	# (owned by z-order).
 	var t: Transform3D = _locked_target.global_transform
 	return Plane(t.basis.z, t.origin).intersects_ray(get_ray_origin(), get_ray_direction())
 

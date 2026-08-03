@@ -16,6 +16,9 @@ export_credentials.cfg
 data_*/
 mono_crash.*.json
 
+# Godot editor temp-save artifacts (e.g. foo.tscn1234567890.tmp)
+*.tscn[0-9]*.tmp
+
 # Project-specific ignores
 build/
 
