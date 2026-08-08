@@ -15,7 +15,7 @@ func _ready():
 					all_apps[app_name] = desktop_data[app_name]
 	
 	# UI Initilzation
-	search_bar.placehotgilder_text = "Search applications..."
+	search_bar.placeholder_text = "Search applications..."
 	search_bar.text_changed.connect(_on_search_changed)
 	
 	# Add apps to UI
@@ -33,7 +33,6 @@ func populate_apps(apps_to_show: Dictionary):
 	# Create list item for each app
 	for app_name in sorted_apps:
 		var app_data = apps_to_show[app_name]
-		print(app_name,app_data)
 		var app_item = create_app_list_item(app_name, app_data)
 		apps_list.add_child(app_item)
 
@@ -99,22 +98,33 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	button.flat = true  # make an Invisible button over the panel
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	button.pressed.connect(_on_app_button_pressed.bind(app_data))
+	button.pressed.connect(_on_app_button_pressed.bind(app_data, app_name))
 	
 	# Add the button as an overlay
 	panel.add_child(button)
 	
 	return panel
 
-func _on_app_button_pressed(app_data: Dictionary):
-	if app_data.has("Exec"):
-		var exec_command = app_data["Exec"]
-		# Clean up the exec command (remove %U, %F, etc.)
-		exec_command = exec_command.replace("%U", "").replace("%F", "").replace("%u", "").replace("%f", "").strip_edges()
-		
-		# Launch the application
-		OS.execute(exec_command, [], [], false)
-		print("Launching: ", exec_command)
+func _on_app_button_pressed(app_data: Dictionary, app_name: String):
+	if not app_data.has("Exec"):
+		return
+
+	var argv := FileUtils.parse_exec(app_data["Exec"], app_name, app_data.get("Icon", ""))
+	# parse_exec has already warned with the specific fault, if there was one.
+	if argv.is_empty():
+		push_warning("app_registry: nothing to launch for %s" % app_name)
+		return
+
+	# create_process, not execute: execute blocks its caller for the child's
+	# entire lifetime, which would freeze the XR compositor until the launched
+	# application exits.
+	var pid := OS.create_process(argv[0], argv.slice(1))
+	# On Unix this only catches a failure to fork — the child's exec failing is
+	# reported on the child's own stderr, so a pid is not proof it started.
+	if pid == -1:
+		push_warning("app_registry: could not launch %s" % argv[0])
+		return
+	print("Launching: ", argv, " (pid ", pid, ")")
 
 func _on_search_changed(new_text: String):
 	if new_text == "":
