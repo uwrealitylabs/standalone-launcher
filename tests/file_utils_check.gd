@@ -20,6 +20,8 @@ func _initialize() -> void:
 	_check_entry_fields_parsed()
 	_check_hidden_entries_skipped()
 	_check_directory_walk()
+	_check_key_order_independent()
+	_check_value_decoding()
 	_check_exec_parsing()
 
 	_teardown()
@@ -102,6 +104,72 @@ func _check_directory_walk() -> void:
 			all_readable = false
 			print("    unreadable: ", path)
 	_check("every returned path is readable as returned", all_readable)
+
+
+## The spec fixes no key order, so an entry whose keys are sorted puts Exec,
+## Icon and Categories ahead of Name and all of them must still land.
+func _check_key_order_independent() -> void:
+	print("[key order]")
+	var path := _write_fixture("alpha.desktop", [
+		"[Desktop Entry]",
+		"Categories=Utility;",
+		"Exec=/usr/bin/alpha %U",
+		"Icon=alpha-icon",
+		"Name=Alpha",
+		"Type=Application",
+	])
+	var app: Dictionary = FileUtils.parse_desktop_file(path).get("Alpha", {})
+	_check("Exec survives ahead of Name",
+			app.get("Exec", "") == "/usr/bin/alpha %U", str(app))
+	_check("Categories survives ahead of Name",
+			app.get("Categories", "") == "Utility;", str(app))
+	_check("Icon survives ahead of Name", app.get("Icon", "") == "alpha-icon", str(app))
+
+	# An Icon read before any Name used to be parked in a static and handed to
+	# whichever file happened to be parsed next.
+	var bare := _write_fixture("bare.desktop", [
+		"[Desktop Entry]", "Name=Bare", "Exec=/bin/bare",
+	])
+	var bare_app: Dictionary = FileUtils.parse_desktop_file(bare).get("Bare", {})
+	_check("no icon leaks in from the previous file", not bare_app.has("Icon"),
+			str(bare_app))
+
+	var unnamed := _write_fixture("unnamed.desktop", [
+		"[Desktop Entry]", "Name=", "Exec=/bin/foo", "Icon=ico",
+	])
+	_check("an empty Name yields no entry",
+			FileUtils.parse_desktop_file(unnamed).is_empty())
+
+
+## Values carry their own "=", and are unescaped before any key-specific rule.
+func _check_value_decoding() -> void:
+	print("[value decoding]")
+	var path := _write_fixture("escapes.desktop", [
+		"[Desktop Entry]",
+		"Name=Escapes",
+		"Exec=env FOO=1 /bin/app --tab=new",
+		"Icon=a\\sb",
+		"Categories=Utility;Audio\\;Video;",
+	])
+	var app: Dictionary = FileUtils.parse_desktop_file(path).get("Escapes", {})
+	_check("a value keeps everything past its first =",
+			app.get("Exec", "") == "env FOO=1 /bin/app --tab=new",
+			str(app.get("Exec", "")))
+	_check("\\s decodes to a space", app.get("Icon", "") == "a b",
+			str(app.get("Icon", "")))
+	var cats := FileUtils.split_list_value(app.get("Categories", ""))
+	_check("an escaped ; stays inside its element",
+			cats == PackedStringArray(["Utility", "Audio;Video"]), str(cats))
+
+	# Wine writes Windows paths into Exec, and none of those backslashes are
+	# escapes the spec defines.
+	var wine := _write_fixture("wine.desktop", [
+		"[Desktop Entry]", "Name=Wine", "Exec=wine C:\\Program\\app.exe",
+	])
+	var wine_app: Dictionary = FileUtils.parse_desktop_file(wine).get("Wine", {})
+	_check("an unrecognized escape is left alone",
+			wine_app.get("Exec", "") == "wine C:\\Program\\app.exe",
+			str(wine_app.get("Exec", "")))
 
 
 ## Exec values must reach OS.create_process as a real argument vector: the

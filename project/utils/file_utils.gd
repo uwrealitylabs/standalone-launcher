@@ -18,74 +18,115 @@ static func load_icon(icon_name: String) -> Texture2D:
 	return null  # Return null if no icon found
 	
 	
-static var icon_for_later = "" # TODO: (refactor) remove global variable
-
-
 ## Parses the [Desktop Entry] section of the .desktop file at `file_path`.
 ##
-## Returns { app_name: { "Exec"/"Icon"/"Categories": value } }, or an empty
-## dictionary when the file cannot be read or the entry asks not to be shown.
-static func parse_desktop_file(file_path: String) -> Dictionary:
-	var file = FileAccess.open(file_path, FileAccess.READ)
+## Returns { app_name: { "Exec"/"Icon"/"Categories": value } } for the single
+## entry the file describes, or an empty dictionary when the file cannot be
+## read, names no application, or asks not to be shown.
+static func parse_desktop_file(file_path: String) -> Dictionary[String, Dictionary]:
+	var result: Dictionary[String, Dictionary] = {}
+	var file := FileAccess.open(file_path, FileAccess.READ)
 	# A single unreadable entry must not take down the whole scan: /usr/share/
 	# applications is world-readable by convention, not by guarantee.
 	if file == null:
 		push_warning("FileUtils: could not read %s (error %d)"
 				% [file_path, FileAccess.get_open_error()])
-		return {}
+		return result
 
-	var in_desktop_entry = false
-	var apps = {}
-	var current_section = ""
+	var in_desktop_entry := false
+	var entry_name := ""
+	# Collected without regard to where Name sits in the file. The spec fixes no
+	# key order, so anything emitting keys sorted puts Exec ahead of Name.
+	var entry := {}
 
 	while not file.eof_reached():
-		
-		
-		var line = file.get_line().strip_edges()
-		
+		var line := file.get_line().strip_edges()
+		if line.begins_with("#"):
+			continue
+
 		if line.begins_with("[") and line.ends_with("]"):
-			if line == "[Desktop Entry]":
-				in_desktop_entry = true
-				continue
+			# Only the first section is ours, and the next header closes it.
 			if in_desktop_entry:
 				break
+			in_desktop_entry = line == "[Desktop Entry]"
 			continue
-		if in_desktop_entry == true:
-			if line.begins_with("Name="):
-				current_section = (line.split("Name="))[1]
-				apps[current_section] = {}
-				if icon_for_later != "":
-					apps[current_section]["Icon"] = icon_for_later
-			elif line.contains("=") and apps != {}:
-				var parts = line.split("=", 2)
-				var key = parts[0].strip_edges()
-				if key == "Terminal":
-					var value = parts[1].strip_edges()
-					if value == "false":
-						continue
-					else:
-						return {}
-				if key == "NoDisplay":
-					var value = parts[1].strip_edges()
-					if value == "false":
-						continue
-					else:
-						return {}
-				if key == "Exec" or key == "Icon" or key == "Categories":
-					var value = parts[1].strip_edges()
-					if current_section:
-						apps[current_section][key] = value
-					else:
-						apps[key] = value
-			if apps == {}:
-					var parts = line.split("=", 2)
-					var key = parts[0].strip_edges()
-					if key == "Icon":
-						icon_for_later = parts[1].strip_edges()
-				
-	
+		if not in_desktop_entry or not line.contains("="):
+			continue
+
+		# maxsplit is the third argument. Passing it second only sets
+		# allow_empty and leaves the split unlimited, which truncates every
+		# value holding an "=" of its own.
+		var parts := line.split("=", true, 1)
+		var key := parts[0].strip_edges()
+		# Stripped before unescaping, so "\s" can still carry a space that the
+		# strip would otherwise have eaten.
+		var value := _unescape_value(parts[1].strip_edges())
+
+		if key == "Terminal" or key == "NoDisplay":
+			# Anything but an explicit "false" is read as asking to be hidden.
+			if value != "false":
+				return result
+		elif key == "Name":
+			entry_name = value
+		elif key == "Exec" or key == "Icon" or key == "Categories":
+			entry[key] = value
+
 	file.close()
-	return apps
+	# Nothing but its Name keys an entry, so one that cannot be named cannot be
+	# offered either.
+	if entry_name.is_empty():
+		return result
+	result[entry_name] = entry
+	return result
+
+
+## Undoes the escaping the spec applies to every value of type string, ahead of
+## any key-specific rule such as Exec's quoting. An unrecognized escape is
+## undefined and kept verbatim, which is what leaves Wine's Windows paths whole.
+static func _unescape_value(raw: String) -> String:
+	var out := ""
+	var i := 0
+
+	while i < raw.length():
+		if raw[i] != "\\" or i + 1 >= raw.length():
+			out += raw[i]
+			i += 1
+			continue
+		match raw[i + 1]:
+			"s": out += " "
+			"n": out += "\n"
+			"t": out += "\t"
+			"r": out += "\r"
+			"\\": out += "\\"
+			_: out += "\\" + raw[i + 1]
+		i += 2
+
+	return out
+
+
+## Splits a `string(s)` value such as Categories on its unescaped ";", undoing
+## the `\;` the spec requires for a semicolon inside an element. The trailing
+## separator the spec asks for yields no empty final element.
+static func split_list_value(value: String) -> PackedStringArray:
+	var items := PackedStringArray()
+	var current := ""
+	var i := 0
+
+	while i < value.length():
+		if value[i] == "\\" and i + 1 < value.length() and value[i + 1] == ";":
+			current += ";"
+			i += 2
+		elif value[i] == ";":
+			items.append(current)
+			current = ""
+			i += 1
+		else:
+			current += value[i]
+			i += 1
+
+	if not current.is_empty():
+		items.append(current)
+	return items
 
 
 # Every field code the Desktop Entry spec defines. Anything else makes the

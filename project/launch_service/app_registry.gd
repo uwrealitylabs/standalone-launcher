@@ -4,16 +4,20 @@ extends Node
 @onready var scroll_container = $MarginContainer/VBoxContainer/ScrollContainer
 @onready var apps_list = $MarginContainer/VBoxContainer/ScrollContainer/VBoxContainer
 
-var all_apps = {}
+# Typed so that a malformed .desktop file fails at the assignment inside
+# parse_desktop_file rather than several frames later, in create_app_list_item's
+# typed parameter, where the error unwinds _ready and leaves no app list at all.
+var all_apps: Dictionary[String, Dictionary] = {}
 
-	
+
 func _ready():
 	var all_files = FileUtils.get_all_file_paths("/usr/share/applications")
 	for file_path in all_files:
-			var desktop_data = FileUtils.parse_desktop_file(file_path)
-			for app_name in desktop_data:
-					all_apps[app_name] = desktop_data[app_name]
-	
+		var desktop_data := FileUtils.parse_desktop_file(file_path)
+		for app_name in desktop_data:
+			all_apps[app_name] = desktop_data[app_name]
+
+
 	# UI Initilzation
 	search_bar.placeholder_text = "Search applications..."
 	search_bar.text_changed.connect(_on_search_changed)
@@ -21,7 +25,7 @@ func _ready():
 	# Add apps to UI
 	populate_apps(all_apps)
 
-func populate_apps(apps_to_show: Dictionary):
+func populate_apps(apps_to_show: Dictionary[String, Dictionary]):
 	# Clear existing content
 	for child in apps_list.get_children():
 		child.queue_free()
@@ -82,8 +86,8 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	# add categories text
 	if app_data.has("Categories"):
 		var categories_label = Label.new()
-		var categories_text = app_data["Categories"].replace(";", ", ").trim_suffix(", ")
-		categories_label.text = categories_text
+		# Split rather than replaced: a category may hold an escaped ";".
+		categories_label.text = ", ".join(FileUtils.split_list_value(app_data["Categories"]))
 		categories_label.add_theme_font_size_override("font_size", 12)
 		categories_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 		vbox.add_child(categories_label)
@@ -130,7 +134,7 @@ func _on_search_changed(new_text: String):
 	if new_text == "":
 		populate_apps(all_apps)
 	else:
-		var filtered_apps = {}
+		var filtered_apps: Dictionary[String, Dictionary] = {}
 		for app_name in all_apps:
 			if app_name.to_lower().contains(new_text.to_lower()):
 				filtered_apps[app_name] = all_apps[app_name]
