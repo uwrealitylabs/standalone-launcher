@@ -20,9 +20,12 @@ static func load_icon(icon_name: String) -> Texture2D:
 	
 ## Parses the [Desktop Entry] section of the .desktop file at `file_path`.
 ##
-## Returns { app_name: { "Exec"/"Icon"/"Categories": value } } for the single
-## entry the file describes, or an empty dictionary when the file cannot be
-## read, names no application, or asks not to be shown.
+##     Name=Files
+##     Exec=nautilus %U     ->  { "Files": { "Exec": "nautilus %U",
+##     Icon=folder                            "Icon": "folder" } }
+##
+## Keys may appear in any order. Returns an empty dictionary when the file
+## cannot be read, carries no Name, or sets Terminal or NoDisplay.
 static func parse_desktop_file(file_path: String) -> Dictionary[String, Dictionary]:
 	var result: Dictionary[String, Dictionary] = {}
 	var file := FileAccess.open(file_path, FileAccess.READ)
@@ -35,8 +38,9 @@ static func parse_desktop_file(file_path: String) -> Dictionary[String, Dictiona
 
 	var in_desktop_entry := false
 	var entry_name := ""
-	# Collected without regard to where Name sits in the file. The spec fixes no
-	# key order, so anything emitting keys sorted puts Exec ahead of Name.
+	# Keys land here as they are read and the entry is named at the end, because
+	# Name may come last: the spec fixes no order, and a file whose keys are
+	# sorted puts Categories, Exec and Icon ahead of it.
 	var entry := {}
 
 	while not file.eof_reached():
@@ -45,7 +49,7 @@ static func parse_desktop_file(file_path: String) -> Dictionary[String, Dictiona
 			continue
 
 		if line.begins_with("[") and line.ends_with("]"):
-			# Only the first section is ours, and the next header closes it.
+			# [Desktop Entry] is the only section read; the next header ends it.
 			if in_desktop_entry:
 				break
 			in_desktop_entry = line == "[Desktop Entry]"
@@ -53,13 +57,12 @@ static func parse_desktop_file(file_path: String) -> Dictionary[String, Dictiona
 		if not in_desktop_entry or not line.contains("="):
 			continue
 
-		# maxsplit is the third argument. Passing it second only sets
-		# allow_empty and leaves the split unlimited, which truncates every
-		# value holding an "=" of its own.
+		# Cut into key and value at the first "=" only, so the value keeps any
+		# further ones: "Exec=env FOO=1 app" gives "env FOO=1 app".
 		var parts := line.split("=", true, 1)
 		var key := parts[0].strip_edges()
-		# Stripped before unescaping, so "\s" can still carry a space that the
-		# strip would otherwise have eaten.
+		# Whitespace comes off first, escapes second: "\s" is how the format
+		# writes a space that the trim would otherwise have eaten.
 		var value := _unescape_value(parts[1].strip_edges())
 
 		if key == "Terminal" or key == "NoDisplay":
@@ -72,17 +75,22 @@ static func parse_desktop_file(file_path: String) -> Dictionary[String, Dictiona
 			entry[key] = value
 
 	file.close()
-	# Nothing but its Name keys an entry, so one that cannot be named cannot be
-	# offered either.
+	# The Name is the entry's key, so an entry without one cannot be returned.
 	if entry_name.is_empty():
 		return result
 	result[entry_name] = entry
 	return result
 
 
-## Undoes the escaping the spec applies to every value of type string, ahead of
-## any key-specific rule such as Exec's quoting. An unrecognized escape is
-## undefined and kept verbatim, which is what leaves Wine's Windows paths whole.
+## Decodes the escapes the .desktop format defines for every string value. Runs
+## before any key-specific rule, such as the quoting inside an Exec value.
+##
+##     /opt/My\sApps  ->  /opt/My Apps
+##     a\\b           ->  a\b
+##     C:\Program     ->  C:\Program     (\P is not an escape, so it stays)
+##
+## The defined escapes are \s \n \t \r and \\; the spec leaves any other
+## backslash pair undefined.
 static func _unescape_value(raw: String) -> String:
 	var out := ""
 	var i := 0
@@ -98,15 +106,21 @@ static func _unescape_value(raw: String) -> String:
 			"t": out += "\t"
 			"r": out += "\r"
 			"\\": out += "\\"
+			# Undefined pairs keep their backslash. Wine writes Windows paths
+			# such as C:\Program\app.exe, and dropping it would break them.
 			_: out += "\\" + raw[i + 1]
 		i += 2
 
 	return out
 
 
-## Splits a `string(s)` value such as Categories on its unescaped ";", undoing
-## the `\;` the spec requires for a semicolon inside an element. The trailing
-## separator the spec asks for yields no empty final element.
+## Splits a list value such as Categories on its ";" separators.
+##
+##     Utility;Development;   ->  ["Utility", "Development"]
+##     Utility;Audio\;Video;  ->  ["Utility", "Audio;Video"]
+##
+## A ";" that belongs inside an element is written "\;" and does not separate.
+## The trailing separator the spec asks for adds no empty final element.
 static func split_list_value(value: String) -> PackedStringArray:
 	var items := PackedStringArray()
 	var current := ""
@@ -134,33 +148,39 @@ static func split_list_value(value: String) -> PackedStringArray:
 const _KNOWN_FIELD_CODES := ["f", "F", "u", "U", "d", "D", "n", "N",
 		"i", "c", "k", "v", "m"]
 
-# Codes that expand to nothing here: the launcher opens no document (%f %F %u
-# %U), the code is deprecated and carries no value (%d %D %n %N %v %m), or the
-# value is not tracked — %k is the .desktop file's own location, which
-# parse_desktop_file does not carry through.
+# Codes that expand to nothing here. %f %F %u %U name the documents being
+# opened, and this launcher opens none; %d %D %n %N %v %m are deprecated and
+# carry no value at all; %k is the .desktop file's own path, which
+# parse_desktop_file does not pass on.
 const _EMPTY_FIELD_CODES := ["f", "F", "u", "U", "d", "D", "n", "N", "v", "m", "k"]
 
-# The spec confines these to an argument of their own, because each expands to
-# a number of arguments rather than to text: %F and %U to one per document, %i
-# to two. Embedded, they would leave a truncated argument like "--files=".
+# Codes the spec allows only as a whole argument, because each stands for a
+# number of arguments rather than for text: %F and %U for one per document, %i
+# for two. Written inside a larger argument they leave a stub like "--files=".
 const _STANDALONE_FIELD_CODES := ["F", "U", "i"]
 
 
 ## Splits a .desktop `Exec` value into an argument vector, element 0 being the
-## executable. Quoted arguments are unwrapped and field codes resolved: `%i`
-## becomes `--icon <icon_name>` when `icon_name` is set, `%c` becomes
-## `display_name`, `%%` a literal `%`, and the rest expand to nothing.
+## executable.
+##
+##     firefox %U             ->  ["firefox"]
+##     sh -c "echo hi there"  ->  ["sh", "-c", "echo hi there"]
+##     app %i                 ->  ["app", "--icon", "folder"]
+##
+## Quotes are unwrapped and field codes resolved: `%i` becomes
+## `--icon <icon_name>` when `icon_name` is set, `%c` becomes `display_name`,
+## `%%` a literal `%`, and the rest expand to nothing.
 ##
 ## Returns an empty array when the value holds no executable, and likewise when
 ## it is malformed — an unclosed quote, an unknown field code, or one of `%F`,
-## `%U` and `%i` embedded in a larger argument — after pushing a warning naming
-## the fault.
+## `%U` and `%i` written inside a larger argument — after pushing a warning
+## naming the fault.
 static func parse_exec(exec_value: String, display_name: String = "",
 		icon_name: String = "") -> PackedStringArray:
 	var tokens := _tokenize_exec(exec_value)
-	# Validated up front and as a whole: the spec requires a command line
-	# carrying an unusable field code to be left unprocessed, not launched with
-	# the offending argument patched up or dropped.
+	# Every token is checked before any is expanded, because one bad field code
+	# invalidates the whole command line: the spec asks for it to be left alone
+	# rather than launched with the offending argument dropped or patched.
 	for token in tokens:
 		var problem := _validate_token(token)
 		if not problem.is_empty():
@@ -169,16 +189,16 @@ static func parse_exec(exec_value: String, display_name: String = "",
 
 	var args := PackedStringArray()
 	for token in tokens:
-		# %i is the one surviving code expanding to two arguments, so it cannot
-		# go through the in-token substitution below.
+		# %i becomes two arguments, so it is handled here instead of by the
+		# substitution below, which can only give one back.
 		if token == "%i":
 			if not icon_name.is_empty():
 				args.append("--icon")
 				args.append(icon_name)
 			continue
 		var expanded := _expand_field_codes(token, display_name)
-		# A token that was only a field code disappears entirely; an argument
-		# the author wrote as "" is kept.
+		# Dropped when a field code expanded away to nothing. An argument the
+		# author wrote as "" starts out empty, so it survives this.
 		if expanded.is_empty() and not token.is_empty():
 			continue
 		args.append(expanded)
@@ -186,15 +206,19 @@ static func parse_exec(exec_value: String, display_name: String = "",
 
 
 ## Returns "" when `token` is a usable argument, otherwise a phrase naming the
-## first fault in it, suitable for embedding in a warning.
+## first fault in it, ready to drop into a warning.
+##
+##     --tab       ->  ""
+##     %x          ->  "unknown field code %x"
+##     --files=%F  ->  "%F used inside the argument --files=%F"
 static func _validate_token(token: String) -> String:
 	var i := 0
 	while i < token.length():
 		if token[i] != "%":
 			i += 1
 			continue
-		# A "%" at the very end introduces no field code, so it stays literal
-		# text rather than invalidating an otherwise launchable command line.
+		# A trailing "%" has no code after it to be wrong about, so it counts as
+		# literal text rather than as a reason to reject the command line.
 		if i + 1 >= token.length():
 			break
 		var code := token[i + 1]
@@ -208,13 +232,19 @@ static func _validate_token(token: String) -> String:
 	return ""
 
 
-## Splits `value` on unquoted whitespace, honouring double quotes and the
-## backslash escapes the spec permits inside them. Returns an empty array, and
+## Splits `value` on whitespace that falls outside double quotes.
+##
+##     sh -c "echo hi"    ->  ["sh", "-c", "echo hi"]
+##     app "a \" b"       ->  ["app", 'a " b']
+##     app foo"bar b"qux  ->  ["app", "foobar bqux"]
+##
+## Inside quotes a backslash escapes " ` $ and \. Returns an empty array, and
 ## pushes a warning, when a quote is never closed.
 static func _tokenize_exec(value: String) -> PackedStringArray:
 	var tokens := PackedStringArray()
 	var current := ""
-	# Tracked separately from `current`, which stays empty for a quoted ""
+	# Set by the first character or quote seen, so that an argument written as
+	# "" is still emitted even though `current` stays empty.
 	var has_token := false
 	var in_quotes := false
 	var i := 0
@@ -247,8 +277,9 @@ static func _tokenize_exec(value: String) -> PackedStringArray:
 			has_token = true
 			i += 1
 
-	# Recovering here would only be a guess, and the guess falls on argument
-	# boundaries: "a b would silently become one argument instead of two.
+	# Give up rather than guess: with the closing quote missing there is no way
+	# to tell where the argument ended, and guessing wrong silently welds two
+	# arguments into one.
 	if in_quotes:
 		push_warning("FileUtils: unclosed quote in Exec=%s" % value)
 		return PackedStringArray()
@@ -258,7 +289,13 @@ static func _tokenize_exec(value: String) -> PackedStringArray:
 	return tokens
 
 
-## Resolves the field codes inside a single token.
+## Resolves the field codes inside a single token, given the entry's
+## `display_name` for `%c`.
+##
+##     --tab       ->  --tab
+##     100%%       ->  100%
+##     %c          ->  the display name
+##     --file=%f   ->  --file=      (there is no document to name)
 static func _expand_field_codes(token: String, display_name: String) -> String:
 	var out := ""
 	var i := 0
@@ -274,8 +311,8 @@ static func _expand_field_codes(token: String, display_name: String) -> String:
 			out += "%"
 		elif code == "c":
 			out += display_name
-		# Anything still here is a code that expands to nothing; _validate_token
-		# has already turned back the codes with no expansion at all.
+		# Every other code expands to nothing. The ones that may not appear here
+		# at all were turned back by _validate_token before this ran.
 
 	return out
 

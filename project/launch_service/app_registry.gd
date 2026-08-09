@@ -4,9 +4,9 @@ extends Node
 @onready var scroll_container = $MarginContainer/VBoxContainer/ScrollContainer
 @onready var apps_list = $MarginContainer/VBoxContainer/ScrollContainer/VBoxContainer
 
-# Typed so that a malformed .desktop file fails at the assignment inside
-# parse_desktop_file rather than several frames later, in create_app_list_item's
-# typed parameter, where the error unwinds _ready and leaves no app list at all.
+# App name -> the entry's Exec, Icon and Categories values. The value type is
+# declared so that anything else is rejected on the way in; caught later, while
+# a row is being built, it would abort _ready and leave the menu empty.
 var all_apps: Dictionary[String, Dictionary] = {}
 
 
@@ -86,7 +86,8 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	# add categories text
 	if app_data.has("Categories"):
 		var categories_label = Label.new()
-		# Split rather than replaced: a category may hold an escaped ";".
+		# "Utility;Audio\;Video;" reads as two categories, so it is split on the
+		# real separators and rejoined rather than having its ";" replaced.
 		categories_label.text = ", ".join(FileUtils.split_list_value(app_data["Categories"]))
 		categories_label.add_theme_font_size_override("font_size", 12)
 		categories_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
