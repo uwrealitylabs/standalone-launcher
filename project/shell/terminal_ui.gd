@@ -7,6 +7,8 @@ extends Control
 var current_dir: String = OS.get_executable_path().get_base_dir()
 var is_running: bool = false
 
+var _current: AsyncCommand = null
+
 
 func _ready():
 	stdout("[color=yellow]SYSTEM READY[/color]")
@@ -24,7 +26,6 @@ func _input(input: InputEvent) -> void:
 	if not key_input:
 		return
 		
-	print("input received")
 	if not input.pressed:
 		return
 	match input.keycode:
@@ -42,6 +43,11 @@ func _input(input: InputEvent) -> void:
 				input_line.insert_text_at_caret(c)
 
 
+func _exit_tree() -> void:
+	if _current != null and not _current.is_finished:
+		_current.cancel()
+
+
 func stdout(text: String):
 	output_display.append_text(text + "\n")
 	output_display.scroll_to_line(output_display.get_line_count())
@@ -51,9 +57,14 @@ func _on_submit(cmd: String) -> void:
 	if cmd == "":
 		return
 
-	# prevent running multiple commands at once
+	# only one command at a time, so the one way in while it runs is to stop it
 	if is_running:
-		stdout("[color=yellow]Command still running, please wait...[/color]")
+		if cmd.strip_edges() == "cancel":
+			stdout("[color=gray]> " + cmd + "[/color]")
+			input_line.text = ""
+			_current.cancel()
+		else:
+			stdout("[color=yellow]Command still running, type 'cancel' to stop it[/color]")
 		return
 
 	stdout("[color=gray]> " + cmd + "[/color]")
@@ -77,9 +88,18 @@ func _on_submit(cmd: String) -> void:
 	is_running = true
 	stdout("[color=yellow]Running...[/color]")
 
-	var result = await AsyncCommand.run(current_dir, cmd)
+	_current = AsyncCommand.new()
+	_current.start(current_dir, cmd)
+	var result: Dictionary = await _current.finished
 
+	_current = null
 	is_running = false
+
+	if result.cancelled:
+		stdout("[color=yellow]Cancelled.[/color]")
+	elif result.timed_out:
+		stdout("[color=red]Timed out after " + str(AsyncCommand.DEFAULT_TIMEOUT_SEC)
+				+ "s and was stopped.[/color]")
 
 	if result.output.strip_edges() != "":
 		if result.exit_code == 0:
