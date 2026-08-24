@@ -1,14 +1,22 @@
 extends SceneTree
 
 ## Verifies FileUtils' .desktop parsing and directory walking against fixtures
-## written to user:// at run time. Run with:
-##   godot --headless --xr-mode off --script res://tests/file_utils_check.gd
+## written to user:// at run time.
+##
+## Run with:
+##   godot --headless --xr-mode off --path . \
+##       --script res://tests/file_utils_check.gd
+##
+## --xr-mode off is required: without an OpenXR runtime, initialization raises a
+## modal alert that never gets dismissed and the run hangs.
 ##
 ## The unreadable-file and malformed-Exec checks deliberately trigger
 ## push_warning; those warnings in the log are expected output, not failures.
 
+const Report := preload("res://tests/support/report.gd")
+
 var _fixture_dir := ""
-var _failures := 0
+var _report := Report.new()
 
 
 func _initialize() -> void:
@@ -25,27 +33,20 @@ func _initialize() -> void:
 	_check_exec_parsing()
 
 	_teardown()
-
-	print("")
-	if _failures == 0:
-		print("PASS - all checks passed")
-		quit(0)
-	else:
-		print("FAIL - %d check(s) failed" % _failures)
-		quit(1)
+	_report.finish(self)
 
 
 ## A file that cannot be opened must yield an empty dictionary, not a crash.
 func _check_unreadable_file_is_survivable() -> void:
-	print("[unreadable file]")
+	_report.section("unreadable file")
 	var missing := _fixture_dir + "/does_not_exist.desktop"
 	var parsed := FileUtils.parse_desktop_file(missing)
-	_check("missing file returns an empty dictionary", parsed.is_empty(), str(parsed))
+	_report.check("missing file returns an empty dictionary", parsed.is_empty(), str(parsed))
 
 
 ## Name keys the result; Exec, Icon and Categories are carried through.
 func _check_entry_fields_parsed() -> void:
-	print("[entry fields]")
+	_report.section("entry fields")
 	var path := _write_fixture("valid.desktop", [
 		"[Desktop Entry]",
 		"Type=Application",
@@ -57,26 +58,26 @@ func _check_entry_fields_parsed() -> void:
 		"NoDisplay=false",
 	])
 	var parsed := FileUtils.parse_desktop_file(path)
-	_check("entry is keyed by Name", parsed.has("Test App"), str(parsed.keys()))
+	_report.check("entry is keyed by Name", parsed.has("Test App"), str(parsed.keys()))
 	if not parsed.has("Test App"):
 		return
 	var app: Dictionary = parsed["Test App"]
-	_check("Exec parsed", app.get("Exec", "") == "/bin/echo hello", str(app.get("Exec", "")))
-	_check("Icon parsed", app.get("Icon", "") == "test-icon", str(app.get("Icon", "")))
-	_check("Categories parsed", app.get("Categories", "") == "Utility;Development;",
+	_report.check("Exec parsed", app.get("Exec", "") == "/bin/echo hello", str(app.get("Exec", "")))
+	_report.check("Icon parsed", app.get("Icon", "") == "test-icon", str(app.get("Icon", "")))
+	_report.check("Categories parsed", app.get("Categories", "") == "Utility;Development;",
 			str(app.get("Categories", "")))
 
 
 ## Terminal=true and NoDisplay=true entries are not offered to the launcher.
 func _check_hidden_entries_skipped() -> void:
-	print("[hidden entries]")
+	_report.section("hidden entries")
 	var terminal := _write_fixture("terminal.desktop", [
 		"[Desktop Entry]",
 		"Name=Terminal App",
 		"Exec=/bin/echo hi",
 		"Terminal=true",
 	])
-	_check("Terminal=true entry is skipped",
+	_report.check("Terminal=true entry is skipped",
 			FileUtils.parse_desktop_file(terminal).is_empty())
 
 	var hidden := _write_fixture("hidden.desktop", [
@@ -85,7 +86,7 @@ func _check_hidden_entries_skipped() -> void:
 		"Exec=/bin/echo hi",
 		"NoDisplay=true",
 	])
-	_check("NoDisplay=true entry is skipped",
+	_report.check("NoDisplay=true entry is skipped",
 			FileUtils.parse_desktop_file(hidden).is_empty())
 
 
@@ -94,22 +95,22 @@ func _check_hidden_entries_skipped() -> void:
 ## does not, so a wrong separator loses whole subtrees while still looking fine
 ## on the files it did find.
 func _check_directory_walk() -> void:
-	print("[directory walk]")
+	_report.section("directory walk")
 	_write_fixture("nested/deep.desktop", ["[Desktop Entry]", "Name=Deep App"])
 	var found := FileUtils.get_all_file_paths(_fixture_dir)
-	_check("walk finds all 4 fixture files", found.size() == 4, str(found.size()))
+	_report.check("walk finds all 4 fixture files", found.size() == 4, str(found.size()))
 	var all_readable := true
 	for path in found:
 		if not FileAccess.file_exists(path):
 			all_readable = false
 			print("    unreadable: ", path)
-	_check("every returned path is readable as returned", all_readable)
+	_report.check("every returned path is readable as returned", all_readable)
 
 
 ## The spec fixes no key order, so an entry whose keys are sorted puts Exec,
 ## Icon and Categories ahead of Name and all of them must still land.
 func _check_key_order_independent() -> void:
-	print("[key order]")
+	_report.section("key order")
 	var path := _write_fixture("alpha.desktop", [
 		"[Desktop Entry]",
 		"Categories=Utility;",
@@ -119,31 +120,31 @@ func _check_key_order_independent() -> void:
 		"Type=Application",
 	])
 	var app: Dictionary = FileUtils.parse_desktop_file(path).get("Alpha", {})
-	_check("Exec survives ahead of Name",
+	_report.check("Exec survives ahead of Name",
 			app.get("Exec", "") == "/usr/bin/alpha %U", str(app))
-	_check("Categories survives ahead of Name",
+	_report.check("Categories survives ahead of Name",
 			app.get("Categories", "") == "Utility;", str(app))
-	_check("Icon survives ahead of Name", app.get("Icon", "") == "alpha-icon", str(app))
+	_report.check("Icon survives ahead of Name", app.get("Icon", "") == "alpha-icon", str(app))
 
-	# An Icon read before any Name used to be parked in a static and handed to
-	# whichever file happened to be parsed next.
+	# Parsing one file must carry no state into the next: this entry names no
+	# Icon, so it must come back without one whatever the file before it held.
 	var bare := _write_fixture("bare.desktop", [
 		"[Desktop Entry]", "Name=Bare", "Exec=/bin/bare",
 	])
 	var bare_app: Dictionary = FileUtils.parse_desktop_file(bare).get("Bare", {})
-	_check("no icon leaks in from the previous file", not bare_app.has("Icon"),
+	_report.check("no icon leaks in from the previous file", not bare_app.has("Icon"),
 			str(bare_app))
 
 	var unnamed := _write_fixture("unnamed.desktop", [
 		"[Desktop Entry]", "Name=", "Exec=/bin/foo", "Icon=ico",
 	])
-	_check("an empty Name yields no entry",
+	_report.check("an empty Name yields no entry",
 			FileUtils.parse_desktop_file(unnamed).is_empty())
 
 
 ## Values carry their own "=", and are unescaped before any key-specific rule.
 func _check_value_decoding() -> void:
-	print("[value decoding]")
+	_report.section("value decoding")
 	var path := _write_fixture("escapes.desktop", [
 		"[Desktop Entry]",
 		"Name=Escapes",
@@ -152,13 +153,13 @@ func _check_value_decoding() -> void:
 		"Categories=Utility;Audio\\;Video;",
 	])
 	var app: Dictionary = FileUtils.parse_desktop_file(path).get("Escapes", {})
-	_check("a value keeps everything past its first =",
+	_report.check("a value keeps everything past its first =",
 			app.get("Exec", "") == "env FOO=1 /bin/app --tab=new",
 			str(app.get("Exec", "")))
-	_check("\\s decodes to a space", app.get("Icon", "") == "a b",
+	_report.check("\\s decodes to a space", app.get("Icon", "") == "a b",
 			str(app.get("Icon", "")))
 	var cats := FileUtils.split_list_value(app.get("Categories", ""))
-	_check("an escaped ; stays inside its element",
+	_report.check("an escaped ; stays inside its element",
 			cats == PackedStringArray(["Utility", "Audio;Video"]), str(cats))
 
 	# Wine writes Windows paths into Exec, and none of those backslashes are
@@ -167,7 +168,7 @@ func _check_value_decoding() -> void:
 		"[Desktop Entry]", "Name=Wine", "Exec=wine C:\\Program\\app.exe",
 	])
 	var wine_app: Dictionary = FileUtils.parse_desktop_file(wine).get("Wine", {})
-	_check("an unrecognized escape is left alone",
+	_report.check("an unrecognized escape is left alone",
 			wine_app.get("Exec", "") == "wine C:\\Program\\app.exe",
 			str(wine_app.get("Exec", "")))
 
@@ -175,7 +176,7 @@ func _check_value_decoding() -> void:
 ## Exec values must reach OS.create_process as a real argument vector: the
 ## executable alone in element 0, arguments split off, and field codes gone.
 func _check_exec_parsing() -> void:
-	print("[exec parsing]")
+	_report.section("exec parsing")
 	_check_exec("firefox", ["firefox"])
 	_check_exec("/usr/bin/gnome-terminal --window", ["/usr/bin/gnome-terminal", "--window"])
 	_check_exec("   spaced   out  ", ["spaced", "out"])
@@ -226,8 +227,8 @@ func _check_exec_parsing() -> void:
 	# invalid, so expanding is one of the conformant choices; pinned here.
 	_check_exec('app "%U"', ["app"])
 
-	_check("empty Exec yields no argv", FileUtils.parse_exec("").is_empty())
-	_check("field-code-only Exec yields no argv", FileUtils.parse_exec("%U").is_empty())
+	_report.check("empty Exec yields no argv", FileUtils.parse_exec("").is_empty())
+	_report.check("field-code-only Exec yields no argv", FileUtils.parse_exec("%U").is_empty())
 
 	_check_rejected("unknown field code", "app %x")
 	_check_rejected("%F inside a larger argument", "app --files=%F")
@@ -241,22 +242,21 @@ func _check_exec_parsing() -> void:
 ## line unprocessed rather than launched with the bad argument patched over.
 func _check_rejected(label: String, exec_value: String) -> void:
 	var got := FileUtils.parse_exec(exec_value, "Test App", "test-icon")
-	_check("%s rejects Exec=%s" % [label, exec_value], got.is_empty(), str(got))
+	_report.check("%s rejects Exec=%s" % [label, exec_value], got.is_empty(), str(got))
 
 
 func _check_exec(exec_value: String, expected: Array, display_name: String = "",
 		icon_name: String = "") -> void:
 	var got := FileUtils.parse_exec(exec_value, display_name, icon_name)
 	var want := PackedStringArray(expected)
-	_check("Exec=%s -> %s" % [exec_value, want], got == want, str(got))
+	_report.check("Exec=%s -> %s" % [exec_value, want], got == want, str(got))
 
 
 func _write_fixture(relative_path: String, lines: Array) -> String:
 	var path := _fixture_dir + "/" + relative_path
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
-		_failures += 1
-		print("  FAIL could not write fixture ", path)
+		_report.check("could not write fixture " + path, false)
 		return path
 	file.store_string("\n".join(lines) + "\n")
 	file.close()
@@ -276,10 +276,3 @@ func _teardown() -> void:
 		DirAccess.remove_absolute(_fixture_dir + "/" + f)
 	DirAccess.remove_absolute(_fixture_dir)
 
-
-func _check(label: String, condition: bool, detail: String = "") -> void:
-	if condition:
-		print("  ok   ", label)
-	else:
-		_failures += 1
-		print("  FAIL ", label, "" if detail.is_empty() else "  (got %s)" % detail)

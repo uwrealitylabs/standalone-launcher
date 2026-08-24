@@ -1,33 +1,39 @@
 extends SceneTree
-# Verification script for virtual-keyboard input isolation. Run:
-#   godot --headless --xr-mode off -s res://tests/virtual_keyboard_input_test.gd
+
+## Verifies that a virtual keypress reaches the focused window and nothing else.
+##
+## The keyboard reports keys by signal alone. Injecting them into the Input
+## singleton instead would latch each one as held forever, because a virtual key
+## carries no matching release, and anything polling Input — the XR simulator's
+## WASD locomotion, any global input handler — would act on it. Run with:
+##   godot --headless --xr-mode off --path . \
+##       --script res://tests/virtual_keyboard_input_test.gd
+##
+## --xr-mode off is required: without an OpenXR runtime, initialization raises a
+## modal alert that never gets dismissed and the run hangs.
+##
+## Adding window.tscn to a headless tree makes the engine print "Viewport
+## Texture must be set to use it" — expected output with no display server, not
+## a failure.
+
+const Report := preload("res://tests/support/report.gd")
+
+var _report := Report.new()
 
 
-var _failures := 0
-
-
-func _check(label: String, cond: bool) -> void:
-	if cond:
-		print("PASS: " + label)
-	else:
-		_failures += 1
-		print("FAIL: " + label)
-
-
-# The simulator maps WASD onto the left thumbstick by polling Input directly, so
-# its own mapping function is the most faithful check that a virtual keypress
-# left no trace in the global held-key state.
+## The simulator's own WASD-to-thumbstick mapping, which reads the global
+## held-key state directly and so answers whether a keypress left a trace there.
 func _left_stick() -> Vector2:
 	var sim := root.get_node_or_null("XrSimulator")
 	if sim:
 		return sim.vector_key_mapping(KEY_D, KEY_A, KEY_W, KEY_S)
-	# Autoload absent under -s: the function reads only Input, so a bare
-	# instance answers the same question
+	# The autoload may be absent under --script. The function reads only Input,
+	# so a bare instance answers the same question.
 	var script: GDScript = load("res://addons/xr-simulator/XRSimulator.gd")
 	return script.new().vector_key_mapping(KEY_D, KEY_A, KEY_W, KEY_S)
 
 
-## The XRToolsVirtualKeyboard2D inside the WindowManager's keyboard.
+## The XRToolsVirtualKeyboard2D inside the WindowManager's keyboard, or null.
 func _find_keyboard(wm: WindowManager) -> XRToolsVirtualKeyboard2D:
 	for child in wm.get_children():
 		if child is XRToolsViewport2DIn3D:
@@ -44,11 +50,12 @@ func _initialize() -> void:
 	await process_frame
 	await process_frame
 
+	_report.section("setup")
 	var kb := _find_keyboard(wm)
-	_check("keyboard found under the window manager", kb != null)
+	_report.check("keyboard found under the window manager", kb != null)
 	if not kb:
-		print("RESULT: %d FAILURES" % (_failures + 1))
-		quit(1)
+		_report.check("cannot continue without a keyboard", false)
+		_report.finish(self)
 		return
 
 	var received: Array[InputEventKey] = []
@@ -58,37 +65,34 @@ func _initialize() -> void:
 	# focused and is the one input should reach
 	var focused: SWindow = wm.get_focused_window()
 	var terminal := focused.content_3d.get_scene_instance() as TerminalUi
-	_check("focused window hosts the terminal", terminal != null)
+	_report.check("the focused window hosts the terminal", terminal != null)
 
-	# --- a single virtual keypress ---
+	_report.section("a single virtual keypress")
 	kb.on_key_pressed("A", 97, false)
 	await process_frame
 
-	_check("key_pressed emitted once", received.size() == 1)
-	_check("emitted event carries KEY_A",
-		received.size() == 1 and received[0].keycode == KEY_A)
-
-	# The regression guard: a press with no matching release must never enter
-	# the global Input singleton, or it latches as held forever
-	_check("KEY_A is not left held in Input",
-		not Input.is_physical_key_pressed(KEY_A))
-
+	_report.check("key_pressed emitted once", received.size() == 1,
+			str(received.size()))
+	_report.check("the emitted event carries KEY_A",
+			received.size() == 1 and received[0].keycode == KEY_A)
+	_report.check("KEY_A is not left held in Input",
+			not Input.is_physical_key_pressed(KEY_A))
 	if terminal:
-		_check("terminal received exactly one 'a'",
-			terminal.input_line.text == "a")
+		_report.check("the terminal received exactly one 'a'",
+				terminal.input_line.text == "a", terminal.input_line.text)
 
-	# --- a key the simulator maps to locomotion ---
+	# W is one of the keys the simulator maps to locomotion, so a key left held
+	# would show up as a deflected thumbstick rather than only as stray input.
+	_report.section("a key the simulator maps to locomotion")
 	kb.on_key_pressed("W", 119, false)
 	await process_frame
 
-	_check("KEY_W is not left held in Input",
-		not Input.is_physical_key_pressed(KEY_W))
-	_check("simulated left thumbstick stays centred",
-		_left_stick() == Vector2.ZERO)
-
+	_report.check("KEY_W is not left held in Input",
+			not Input.is_physical_key_pressed(KEY_W))
+	_report.check("the simulated left thumbstick stays centred",
+			_left_stick() == Vector2.ZERO, str(_left_stick()))
 	if terminal:
-		_check("terminal received both characters",
-			terminal.input_line.text == "aw")
+		_report.check("the terminal received both characters",
+				terminal.input_line.text == "aw", terminal.input_line.text)
 
-	print("RESULT: %s" % ("ALL PASS" if _failures == 0 else "%d FAILURES" % _failures))
-	quit(1 if _failures else 0)
+	_report.finish(self)

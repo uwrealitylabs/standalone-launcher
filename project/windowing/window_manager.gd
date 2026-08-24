@@ -125,7 +125,6 @@ func _recalculate_z_order() -> void:
 
 ## Drops a closed window from the stack and promotes the next frontmost one.
 func _on_window_closed(win: Node3D) -> void:
-	print("removed from window list")
 	windows_list.erase(win)
 	if win == _focused:
 		_focused = null

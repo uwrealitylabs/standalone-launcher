@@ -208,7 +208,6 @@ func start_drag(event: XRToolsPointerEvent) -> void:
 	_drag_offset.z = 0.0
 	_drag_target = global_position
 	set_process(true)
-	print("[%s] drag start z=%.5f" % [name, global_position.z])
 
 ## Retargets the in-flight drag to `hit_world`, clamped to world bounds. No-op
 ## when no drag is in flight.
@@ -237,7 +236,6 @@ func stop_drag() -> void:
 	_dragging = false
 	# The other gesture may still need the tick
 	set_process(_resizing)
-	print("[%s] drag end z=%.5f" % [name, global_position.z])
 
 ## `pos` clamped into world_bounds on X and Y; Z is passed through untouched.
 func _clamp_to_bounds(pos: Vector3) -> Vector3:
@@ -262,7 +260,6 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
 	set_process(true)
-	print("[%s] resize start z=%.5f" % [name, global_position.z])
 
 
 ## Resizes the window to follow the pointer at `hit_world`, keeping the edges
@@ -323,7 +320,6 @@ func stop_resize() -> void:
 	set_process(_dragging)
 	# Gesture over: settle exactly, whatever the throttle last committed
 	_apply_size(content_size)
-	print("[%s] resize stops z=%.5f" % [name, global_position.z])
 
 
 ## Resizes the window's content to `new_size`, clamped to MIN/MAX_CONTENT_SIZE,
