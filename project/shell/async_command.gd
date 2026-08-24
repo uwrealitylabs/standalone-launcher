@@ -30,6 +30,9 @@ const _BACKSTOP_GRACE_SEC := 8
 
 var is_finished := false
 
+## The deadline this command was started with, in seconds.
+var timeout_sec := DEFAULT_TIMEOUT_SEC
+
 # Distinguishes two commands started in the same millisecond, which would
 # otherwise be handed the same scratch directory and overwrite each other.
 static var _serial := 0
@@ -47,14 +50,15 @@ var _keepalive: AsyncCommand = null
 ## Starts `command` in `working_dir`. Returns at once; the result arrives on
 ## [signal finished]. Calling this twice on one instance is not supported.
 func start(working_dir: String, command: String,
-		timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> void:
+		seconds: int = DEFAULT_TIMEOUT_SEC) -> void:
 	_keepalive = self
+	timeout_sec = seconds
 	_working_dir = working_dir
 	_serial += 1
 	_workspace = "%s/async_cmd_%d_%d" % [OS.get_user_data_dir(),
 			Time.get_ticks_usec(), _serial]
 	DirAccess.make_dir_recursive_absolute(_workspace)
-	_wait_for(command, timeout_sec)
+	_wait_for(command)
 
 
 ## Stops the command early. The result still arrives on [signal finished], with
@@ -74,8 +78,8 @@ func _path(name: String) -> String:
 	return _workspace + "/" + name
 
 
-func _wait_for(command: String, timeout_sec: int) -> void:
-	var script_path := _write_script(command, timeout_sec)
+func _wait_for(command: String) -> void:
+	var script_path := _write_script(command)
 	var launcher := "cmd.exe" if OS.get_name() == "Windows" else "bash"
 	var args := ["/c", script_path] if OS.get_name() == "Windows" else [script_path]
 	var pid := OS.create_process(launcher, args)
@@ -137,11 +141,11 @@ func _remove_workspace() -> void:
 	DirAccess.remove_absolute(_workspace)
 
 
-func _write_script(command: String, timeout_sec: int) -> String:
+func _write_script(command: String) -> String:
 	var is_windows := OS.get_name() == "Windows"
 	var script_path := _path("cmd.bat" if is_windows else "cmd.sh")
 	var content := (_windows_script(command) if is_windows
-			else _posix_script(command, timeout_sec))
+			else _posix_script(command))
 	var file := FileAccess.open(script_path, FileAccess.WRITE)
 	file.store_string(content)
 	file.close()
@@ -149,7 +153,7 @@ func _write_script(command: String, timeout_sec: int) -> String:
 
 
 ## Builds the shell script that runs `command` and records how it ended.
-func _posix_script(command: String, timeout_sec: int) -> String:
+func _posix_script(command: String) -> String:
 	# The command sits alone inside a subshell so that nothing it contains can
 	# reach the redirection: written on the same line, a ";" would send only
 	# the last part to the output file, a "#" would comment the redirect out,
@@ -167,7 +171,6 @@ func _posix_script(command: String, timeout_sec: int) -> String:
 	script += "\t[ -f \"%s\" ] && break\n" % _path("cancel")
 	script += "\tif [ \"$waited\" -ge %d ]; then\n" % timeout_sec
 	script += "\t\t: > \"%s\"\n" % _path("timeout")
-	script += "\t\techo \"[timed out after %ds]\" >> \"%s\"\n" % [timeout_sec, _path("out")]
 	script += "\t\tbreak\n\tfi\n"
 	script += "\tkill -0 \"$child\" 2>/dev/null || exit 0\n"
 	script += "\tsleep 1\n\twaited=$((waited+1))\n"

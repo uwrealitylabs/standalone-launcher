@@ -106,14 +106,14 @@ func _check_stdin_is_closed() -> void:
 func _check_timeout() -> void:
 	print("[timeout]")
 	var started := Time.get_ticks_msec()
-	var r := await _run_cmd("sleep 30", "/tmp", 2)
+	var r := await _run_cmd("echo partial; sleep 30", "/tmp", 2)
 	var elapsed := Time.get_ticks_msec() - started
 	_check("a runaway command is stopped near its deadline",
 			elapsed < 12000, "%dms" % elapsed)
 	_check("the timeout is reported as such", r.timed_out, str(r))
 	_check("a timeout is not reported as a cancel", not r.cancelled, str(r))
-	_check("the output says why it stopped",
-			r.output.to_lower().contains("timed out"), str(r))
+	_check("what the command printed before it was stopped is kept",
+			r.output.strip_edges() == "partial", str(r))
 	_check_no_workspaces_left("after a timeout")
 
 

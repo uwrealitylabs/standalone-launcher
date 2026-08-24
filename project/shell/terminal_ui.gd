@@ -92,21 +92,23 @@ func _on_submit(cmd: String) -> void:
 	_current.start(current_dir, cmd)
 	var result: Dictionary = await _current.finished
 
+	var limit := _current.timeout_sec
 	_current = null
 	is_running = false
+
+	# Whatever the command managed to print comes first, even when it was
+	# stopped part-way, and is then followed by exactly one line saying how it
+	# ended. A stopped command's exit code only says which signal stopped it,
+	# so it is not worth showing.
+	var body: String = result.output.strip_edges()
+	if body != "":
+		stdout(body if result.exit_code == 0 else "[color=red]" + body + "[/color]")
 
 	if result.cancelled:
 		stdout("[color=yellow]Cancelled.[/color]")
 	elif result.timed_out:
-		stdout("[color=red]Timed out after " + str(AsyncCommand.DEFAULT_TIMEOUT_SEC)
-				+ "s and was stopped.[/color]")
-
-	if result.output.strip_edges() != "":
-		if result.exit_code == 0:
-			stdout(result.output.strip_edges())
-		else:
-			stdout("[color=red]" + result.output.strip_edges() + "[/color]")
-	else:
+		stdout("[color=red]Stopped after " + str(limit) + "s.[/color]")
+	elif body == "":
 		if result.exit_code == 0:
 			stdout("[color=green]Done (exit code 0)[/color]")
 		else:
