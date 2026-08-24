@@ -44,11 +44,12 @@ func create_keyboard() -> void:
 
 ## Invoked on (virtual) keyboard input
 func _on_key_pressed(event: InputEventKey) -> void:
-	if not XRUtils.is_openxr_active():  # In editor, only map virtual keyboard input to windows
-		if not _focused:
-			return
-		print(_focused)
-		_focused.send_input(event)
+	# The only route virtual keys take. The keyboard emits this signal rather than
+	# injecting into the Input singleton, so nothing else in the tree ever sees
+	# them -- typing cannot drive the simulator's WASD locomotion.
+	if not _focused:
+		return
+	_focused.send_input(event)
 
 
 ## Closes `win`. Ignored when it is not in the stack.

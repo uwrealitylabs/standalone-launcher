@@ -44,8 +44,8 @@ func on_key_pressed(scan_code_text: String, unicode: int, shift: bool):
 	input.keycode = scan_code
 	input.shift_pressed = shift
 
-	# Dispatch the input event
-	Input.parse_input_event(input)
+	# Dispatched by signal alone. Injecting into the Input singleton instead would
+	# latch the key as held forever, because a virtual key has no matching release.
 	key_pressed.emit(input)
 
 	# Pop any temporary shift key
