@@ -1,7 +1,7 @@
 [gd_scene load_steps=13 format=3 uid="uid://eposco7r4gm8"]
 
 [ext_resource type="Script" uid="uid://ccfrhlog00wu1" path="res://project/windowing/swindow.gd" id="1_idmct"]
-[ext_resource type="PackedScene" uid="uid://dgdb1texynduw" path="res://addons/godot-xr-tools/objects/virtual_keyboard.tscn" id="2_5i7x0"]
+[ext_resource type="PackedScene" uid="uid://clujaf3u776a3" path="res://addons/godot-xr-tools/objects/viewport_2d_in_3d.tscn" id="2_5i7x0"]
 [ext_resource type="PackedScene" uid="uid://bre1qha8pkyq6" path="res://project/windowing/window_header.tscn" id="2_832o4"]
 [ext_resource type="PackedScene" uid="uid://dsspyu52mpyhh" path="res://project/windowing/window_placeholder_content.tscn" id="2_hnifa"]
 
@@ -51,9 +51,14 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.415, 0)
 screen_size = Vector2(1.5, 0.08)
 scene = ExtResource("2_832o4")
 viewport_size = Vector2(399.93, 20)
+update_mode = 2
+throttle_fps = 60.0
+transparent = 0
+unshaded = true
 scene_properties_keys = PackedStringArray("window_header.gd")
 
 [node name="Viewport" parent="Header" index="0"]
+transparent_bg = false
 size = Vector2i(399, 20)
 
 [node name="Screen" parent="Header" index="1"]
@@ -68,12 +73,26 @@ viewport_size = Vector2(399.93, 20)
 shape = SubResource("BoxShape3D_header")
 
 [node name="Content" parent="." instance=ExtResource("2_5i7x0")]
+screen_size = Vector2(1.5, 0.75)
 scene = null
+viewport_size = Vector2(400, 200)
+update_mode = 2
+throttle_fps = 60.0
+transparent = 0
+unshaded = true
 scene_properties_keys = PackedStringArray()
+
+[node name="Viewport" parent="Content" index="0"]
+transparent_bg = false
+size = Vector2i(400, 200)
 
 [node name="Screen" parent="Content" index="1"]
 mesh = SubResource("QuadMesh_hnifa")
 surface_material_override/0 = SubResource("StandardMaterial3D_ell4n")
+
+[node name="StaticBody3D" parent="Content" index="2"]
+screen_size = Vector2(1.5, 0.75)
+viewport_size = Vector2(400, 200)
 
 [node name="CollisionShape3D" parent="Content/StaticBody3D" index="0"]
 shape = SubResource("BoxShape3D_td1wq")

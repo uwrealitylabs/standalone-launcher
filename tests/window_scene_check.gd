@@ -26,6 +26,9 @@ const WINDOW_SCENE := "res://project/windowing/window.tscn"
 const HEADER_HEIGHT := 0.08
 const CONTENT_SIZE := Vector2(1.5, 0.75)
 
+# Must match the throttle_fps window.tscn authors on both surfaces.
+const THROTTLE_FPS := 60.0
+
 var _report := Report.new()
 
 
@@ -43,6 +46,7 @@ func _initialize() -> void:
 	_check_resources_unshared(w1, w2)
 	_check_header_geometry(w1)
 	_check_content_geometry(w1)
+	_check_redraw_cadence(w1)
 	_check_seam(w1)
 
 	w1.free()
@@ -80,6 +84,22 @@ func _check_resources_unshared(w1: Node3D, w2: Node3D) -> void:
 			not _same(Fixtures.shape(w1, "Header"), Fixtures.shape(w2, "Header")))
 	_report.check("window instances do not share a content shape",
 			not _same(Fixtures.shape(w1, "Content"), Fixtures.shape(w2, "Content")))
+
+
+## Both surfaces must redraw on the cadence window.tscn authors for them.
+##
+## The window used to borrow its surfaces from the XR Tools virtual keyboard,
+## which authors 15 fps because that is a sensible rate for a keyboard. Reading
+## the rate back here is what catches the surfaces being re-parented onto a
+## scene that carries a cadence of its own.
+func _check_redraw_cadence(w: Node3D) -> void:
+	_report.section("redraw cadence")
+	for part in ["Header", "Content"]:
+		var surface: Node3D = w.get_node(part)
+		_report.check("%s redraws on a throttle" % part.to_lower(),
+				surface.update_mode == XRToolsViewport2DIn3D.UpdateMode.UPDATE_THROTTLED,
+				str(surface.update_mode))
+		_report.near("%s throttle_fps" % part.to_lower(), surface.throttle_fps, THROTTLE_FPS)
 
 
 ## Header mesh, collider, and both screen_size translators must agree, and the
