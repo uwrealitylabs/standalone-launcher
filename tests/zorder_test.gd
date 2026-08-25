@@ -19,6 +19,7 @@ const Report := preload("res://tests/support/report.gd")
 const Fixtures := preload("res://tests/support/window_fixtures.gd")
 
 const GRID_EPS := 0.0001
+const APP_MENU := "res://project/launch_service/application_menu.tscn"
 
 var _report := Report.new()
 
@@ -45,6 +46,18 @@ func _initialize() -> void:
 	var wm: WindowManager = wm_scene.instantiate()
 	root.add_child(wm)
 	await process_frame
+
+	_report.section("startup")
+	_report.check("_ready spawns two windows", wm.windows_list.size() == 2,
+			str(wm.windows_list.size()))
+	# The app browser is the launcher's reason to exist, and nothing else in the
+	# project instantiates it, so losing this line takes the feature out silently.
+	var menu: SWindow = wm.windows_list[0]
+	_report.check("the first window carries the app menu",
+			menu.content != null and menu.content.resource_path == APP_MENU,
+			"null" if menu.content == null else menu.content.resource_path)
+	_report.check("the app menu really instantiated",
+			menu.content_3d.get_scene_instance() != null)
 
 	# WindowManager._ready spawns two windows; a third gives the stack a middle
 	var w3 := wm.create_window(Vector3(0.0, 1.2, -2.0))

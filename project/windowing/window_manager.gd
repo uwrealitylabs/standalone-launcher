@@ -152,7 +152,8 @@ func _on_window_focused(win: SWindow) -> void:
 
 func _ready() -> void:
 	# TEMP: hardcoded startup windows, pending a real session/launcher flow
-	var win1: SWindow = create_window(Vector3(-0.3, 1.5, -2.0))
+	create_window(Vector3(-0.3, 1.5, -2.0),
+			load("res://project/launch_service/application_menu.tscn"))
 	create_window(Vector3(0.3, 1.5, -2.0), load("res://project/shell/terminal_ui.tscn"))
 	
 	create_keyboard()

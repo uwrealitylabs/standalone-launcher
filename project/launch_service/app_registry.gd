@@ -43,7 +43,7 @@ func populate_apps(apps_to_show: Dictionary[String, Dictionary]):
 func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContainer:
 	# panel container as a background
 	var panel = PanelContainer.new()
-	panel.custom_minimum_size = Vector2(1000, 60)  
+	panel.custom_minimum_size = Vector2(0, 60)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
 	# Main horizontal container
