@@ -1,12 +1,37 @@
 class_name FileUtils
 
+## Environment variable naming the directory to scan instead of the default.
+const SHARE_DIR_ENV := "WRL_SHARE_DIR"
+
+## Where the target board keeps its applications and icons.
+const DEFAULT_SHARE_DIR := "/usr/share"
+
+
+## Root of the applications/, icons/ and pixmaps/ trees the launcher reads.
+##
+## Returns [constant DEFAULT_SHARE_DIR] unless [constant SHARE_DIR_ENV] names
+## another directory, in which case that one is used with trailing slashes
+## removed.
+static func share_dir() -> String:
+	var override := OS.get_environment(SHARE_DIR_ENV)
+	if override.is_empty():
+		return DEFAULT_SHARE_DIR
+	return override.rstrip("/")
+
+
+## Directory holding the .desktop files to scan.
+static func applications_dir() -> String:
+	return share_dir() + "/applications"
+
+
 static func load_icon(icon_name: String) -> Texture2D:
 	# Handle different icon path formats
+	var share := share_dir()
 	var possible_paths = [
 		icon_name,  # Absolute path
-		"/usr/share/icons/hicolor/48x48/apps/" + icon_name + ".png",
-		"/usr/share/pixmaps/" + icon_name + ".png",
-		"/usr/share/icons/hicolor/scalable/apps/" + icon_name + ".svg"
+		share + "/icons/hicolor/48x48/apps/" + icon_name + ".png",
+		share + "/pixmaps/" + icon_name + ".png",
+		share + "/icons/hicolor/scalable/apps/" + icon_name + ".svg"
 	]
 	
 	for path in possible_paths:

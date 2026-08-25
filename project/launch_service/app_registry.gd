@@ -11,7 +11,7 @@ var all_apps: Dictionary[String, Dictionary] = {}
 
 
 func _ready():
-	var all_files = FileUtils.get_all_file_paths("/usr/share/applications")
+	var all_files = FileUtils.get_all_file_paths(FileUtils.applications_dir())
 	for file_path in all_files:
 		var desktop_data := FileUtils.parse_desktop_file(file_path)
 		for app_name in desktop_data:

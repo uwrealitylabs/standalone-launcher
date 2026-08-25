@@ -31,6 +31,7 @@ func _initialize() -> void:
 	_check_key_order_independent()
 	_check_value_decoding()
 	_check_exec_parsing()
+	_check_share_dir_override()
 
 	_teardown()
 	_report.finish(self)
@@ -250,6 +251,70 @@ func _check_exec(exec_value: String, expected: Array, display_name: String = "",
 	var got := FileUtils.parse_exec(exec_value, display_name, icon_name)
 	var want := PackedStringArray(expected)
 	_report.check("Exec=%s -> %s" % [exec_value, want], got == want, str(got))
+
+
+## The scan root must follow SHARE_DIR_ENV, for .desktop files and icons alike.
+func _check_share_dir_override() -> void:
+	_report.section("share dir override")
+	var share_root := _fixture_dir + "_share"
+	_remove_tree(share_root)
+	DirAccess.make_dir_recursive_absolute(share_root + "/applications")
+	DirAccess.make_dir_recursive_absolute(share_root + "/icons/hicolor/48x48/apps")
+	DirAccess.make_dir_recursive_absolute(share_root + "/pixmaps")
+
+	OS.unset_environment(FileUtils.SHARE_DIR_ENV)
+	_report.check("defaults to the board's path",
+			FileUtils.applications_dir() == "/usr/share/applications",
+			FileUtils.applications_dir())
+
+	OS.set_environment(FileUtils.SHARE_DIR_ENV, share_root)
+	_report.check("the override redirects the scan",
+			FileUtils.applications_dir() == share_root + "/applications",
+			FileUtils.applications_dir())
+
+	# Comparing strings alone would pass against a root nothing can be read from,
+	# which is the one outcome the override exists to avoid.
+	var entry := share_root + "/applications/probe.desktop"
+	var file := FileAccess.open(entry, FileAccess.WRITE)
+	file.store_string("[Desktop Entry]\nName=Probe\nExec=/bin/true\nIcon=probe\n")
+	file.close()
+	var found: Array = FileUtils.get_all_file_paths(FileUtils.applications_dir())
+	_report.check("the override's .desktop files are walked", found == [entry], str(found))
+
+	_write_png(share_root + "/icons/hicolor/48x48/apps/themed.png")
+	_write_png(share_root + "/pixmaps/pixmapped.png")
+	_report.check("themed icons resolve under the override",
+			FileUtils.load_icon("themed") != null)
+	_report.check("pixmaps resolve under the override",
+			FileUtils.load_icon("pixmapped") != null)
+	_report.check("an icon that is not there is still null",
+			FileUtils.load_icon("absent") == null)
+
+	OS.set_environment(FileUtils.SHARE_DIR_ENV, share_root + "//")
+	_report.check("a trailing slash is trimmed",
+			FileUtils.applications_dir() == share_root + "/applications",
+			FileUtils.applications_dir())
+
+	OS.unset_environment(FileUtils.SHARE_DIR_ENV)
+	_remove_tree(share_root)
+
+
+func _write_png(path: String) -> void:
+	var image := Image.create_empty(4, 4, false, Image.FORMAT_RGBA8)
+	image.fill(Color.RED)
+	image.save_png(path)
+
+
+## Deletes `path` and everything under it, at any depth.
+func _remove_tree(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	for sub in dir.get_directories():
+		_remove_tree(path + "/" + sub)
+	for f in dir.get_files():
+		DirAccess.remove_absolute(path + "/" + f)
+	DirAccess.remove_absolute(path)
 
 
 func _write_fixture(relative_path: String, lines: Array) -> String:
