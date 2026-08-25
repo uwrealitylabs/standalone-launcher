@@ -1,5 +1,8 @@
 extends Node
 
+## Side length of an app row's icon, and the size icons are requested at.
+const ICON_SIZE := 48
+
 @onready var search_bar = $MarginContainer/VBoxContainer/LineEdit
 @onready var scroll_container = $MarginContainer/VBoxContainer/ScrollContainer
 @onready var apps_list = $MarginContainer/VBoxContainer/ScrollContainer/VBoxContainer
@@ -58,13 +61,13 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	
 	# Icon on the left of the panel
 	var icon_rect = TextureRect.new()
-	icon_rect.custom_minimum_size = Vector2(48, 48)
+	icon_rect.custom_minimum_size = Vector2(ICON_SIZE, ICON_SIZE)
 	icon_rect.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
 	icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	
 	# try and load icons
 	if app_data.has("Icon"):
-		var icon_texture = FileUtils.load_icon(app_data["Icon"])
+		var icon_texture = IconTheme.load_icon(app_data["Icon"], ICON_SIZE)
 		if icon_texture:
 			icon_rect.texture = icon_texture
 			

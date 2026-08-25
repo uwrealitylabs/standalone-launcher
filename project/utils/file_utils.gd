@@ -24,25 +24,6 @@ static func applications_dir() -> String:
 	return share_dir() + "/applications"
 
 
-static func load_icon(icon_name: String) -> Texture2D:
-	# Handle different icon path formats
-	var share := share_dir()
-	var possible_paths = [
-		icon_name,  # Absolute path
-		share + "/icons/hicolor/48x48/apps/" + icon_name + ".png",
-		share + "/pixmaps/" + icon_name + ".png",
-		share + "/icons/hicolor/scalable/apps/" + icon_name + ".svg"
-	]
-	
-	for path in possible_paths:
-		if FileAccess.file_exists(path):
-			var image = Image.load_from_file(path)
-			if image:
-				return ImageTexture.create_from_image(image)
-	
-	return null  # Return null if no icon found
-	
-	
 ## Parses the [Desktop Entry] section of the .desktop file at `file_path`.
 ##
 ##     Name=Files

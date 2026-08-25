@@ -284,11 +284,11 @@ func _check_share_dir_override() -> void:
 	_write_png(share_root + "/icons/hicolor/48x48/apps/themed.png")
 	_write_png(share_root + "/pixmaps/pixmapped.png")
 	_report.check("themed icons resolve under the override",
-			FileUtils.load_icon("themed") != null)
+			IconTheme.load_icon("themed") != null)
 	_report.check("pixmaps resolve under the override",
-			FileUtils.load_icon("pixmapped") != null)
+			IconTheme.load_icon("pixmapped") != null)
 	_report.check("an icon that is not there is still null",
-			FileUtils.load_icon("absent") == null)
+			IconTheme.load_icon("absent") == null)
 
 	OS.set_environment(FileUtils.SHARE_DIR_ENV, share_root + "//")
 	_report.check("a trailing slash is trimmed",
