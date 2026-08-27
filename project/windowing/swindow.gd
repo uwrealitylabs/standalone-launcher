@@ -165,10 +165,21 @@ func focus() -> void:
 	on_focused.emit(self)
 
 
-## Sets whether input events will be directed to this window
+## Sets whether input events will be directed to this window, and tells the
+## content scene, if it defines on_window_focus_changed(bool), that focus moved.
 func set_input_enabled(enabled: bool) -> void:
 	content_3d.input_keyboard = enabled
 	content_3d.input_gamepad = enabled
+	# The header is gated for keys too, or every window's title bar would keep
+	# taking physical ones no matter which window is being typed into. Its
+	# gamepad flag is left as authored, which is off.
+	header_3d.input_keyboard = enabled
+
+	# The scene is set after the first focus call, so early on there is nothing
+	# to notify yet -- content_3d reports null until then.
+	var scene := content_3d.get_scene_instance()
+	if scene and scene.has_method("on_window_focus_changed"):
+		scene.on_window_focus_changed(enabled)
 
 ## Places the window at the depth its z_order calls for, leaving XY untouched.
 func apply_z_order() -> void:
