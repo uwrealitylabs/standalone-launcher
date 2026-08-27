@@ -46,6 +46,10 @@ func _on_node_added(node: Node):
 	if node is XRCamera3D:
 		camera = node
 		camera.rotate_y(deg_to_rad(1.0))
+		# Autoloads run before the main scene, so _ready is too early to know
+		# whether there is a rig to drive. Capturing on discovery leaves a scene
+		# without one alone, where nothing would ever release the pointer.
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif node is XRController3D:
 		var pose = node.pose
 		if node.tracker == "left_hand":
@@ -89,17 +93,19 @@ func _ready():
 	
 	get_tree().node_added.connect(_on_node_added)
 	_search_first_xr_nodes(get_tree().root)
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _input(event):
 	if not enabled or not OS.has_feature("editor"):
 		return
-	if not left_tracker or not right_tracker or not camera:
-		return
+	# Releasing runs ahead of the rig guard so the pointer can always be freed,
+	# including in a scene that has nothing for this to simulate.
 	if Input.is_key_pressed(KEY_ESCAPE):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	elif Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and event is InputEventMouseButton:
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED	
+		return
+	if not left_tracker or not right_tracker or not camera:
+		return
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and event is InputEventMouseButton:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		return
