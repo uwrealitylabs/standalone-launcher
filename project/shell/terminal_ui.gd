@@ -10,6 +10,8 @@ var is_running: bool = false
 var _current: AsyncCommand = null
 # Paragraph holding the "Running..." notice, or -1 when none is showing.
 var _running_line := -1
+# Where "cd -" goes back to. Empty until the first successful cd.
+var _previous_dir := ""
 
 
 func _ready():
@@ -65,6 +67,51 @@ func _clear_running_notice() -> void:
 	_running_line = -1
 
 
+## Applies a `cd` argument to `current_dir`, reporting where it ended up or why
+## it could not. No argument means home, "-" means the previous directory.
+func _change_dir(arg: String) -> void:
+	var quoted := arg.length() >= 2 and (
+			(arg.begins_with("\"") and arg.ends_with("\""))
+			or (arg.begins_with("'") and arg.ends_with("'")))
+	var target := arg.substr(1, arg.length() - 2) if quoted else arg
+
+	if target == "-":
+		if _previous_dir == "":
+			stdout("[color=red]No previous directory[/color]")
+			return
+		target = _previous_dir
+
+	# Known issue: the rest of the line is taken as part of the path, so
+	# "cd ..; pwd" looks for a directory named "..; pwd" and reports it missing.
+	# Left that way on purpose: passing the line to a shell instead would run it
+	# in a subshell that is then discarded, so pwd would print the parent as
+	# though the move had worked, while current_dir stayed put and the next
+	# command still ran here - trading a loud failure for a silent wrong one.
+	var resolved := _resolve_dir(target)
+	if not DirAccess.dir_exists_absolute(resolved):
+		stdout("[color=red]Directory not found: " + resolved + "[/color]")
+		return
+	_previous_dir = current_dir
+	current_dir = resolved
+	stdout("[color=cyan]Directory changed to: " + current_dir + "[/color]")
+
+
+## Turns a `cd` argument into an absolute path.
+func _resolve_dir(arg: String) -> String:
+	var home := OS.get_environment("HOME")
+	var path := arg
+	if home != "" and (path == "" or path == "~"):
+		path = home
+	elif home != "" and path.begins_with("~/"):
+		path = home.path_join(path.substr(2))
+	# Relative paths are resolved here rather than left to the command, because
+	# the command runs from wherever the launcher was started, not from
+	# current_dir, and would otherwise land somewhere else entirely.
+	if not path.begins_with("/"):
+		path = current_dir.path_join(path)
+	return path.simplify_path()
+
+
 func _on_submit(cmd: String) -> void:
 	if cmd == "":
 		return
@@ -83,16 +130,12 @@ func _on_submit(cmd: String) -> void:
 	input_line.text = ""
 
 	# built-in commands
-	if cmd.begins_with("cd "):
-		var new_dir = cmd.substr(3).strip_edges()
-		if DirAccess.dir_exists_absolute(new_dir):
-			current_dir = new_dir
-			stdout("[color=cyan]Directory changed to: " + current_dir + "[/color]")
-		else:
-			stdout("[color=red]Directory not found: " + new_dir + "[/color]")
+	var line := cmd.strip_edges()
+	if line == "cd" or line.begins_with("cd "):
+		_change_dir(line.substr(2).strip_edges())
 		return
 
-	if cmd == "clear":
+	if line == "clear":
 		output_display.clear()
 		return
 
