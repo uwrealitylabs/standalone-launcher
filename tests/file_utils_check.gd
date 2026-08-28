@@ -96,9 +96,13 @@ func _check_hidden_entries_skipped() -> void:
 ## on the files it did find.
 func _check_directory_walk() -> void:
 	_report.section("directory walk")
-	_write_fixture("nested/deep.desktop", ["[Desktop Entry]", "Name=Deep App"])
+	var deep := _write_fixture("nested/deep.desktop", ["[Desktop Entry]", "Name=Deep App"])
+	var top := _write_fixture("walked.desktop", ["[Desktop Entry]", "Name=Walked App"])
 	var found := FileUtils.get_all_file_paths(_fixture_dir)
-	_report.check("walk finds all 4 fixture files", found.size() == 4, str(found.size()))
+	# Named, not counted: every check shares _fixture_dir, so a total would fail
+	# here whenever an unrelated one gained a fixture, and blame the walk for it.
+	_report.check("the walk finds a file in the root", top in found, str(found))
+	_report.check("the walk recurses into subdirectories", deep in found, str(found))
 	var all_readable := true
 	for path in found:
 		if not FileAccess.file_exists(path):

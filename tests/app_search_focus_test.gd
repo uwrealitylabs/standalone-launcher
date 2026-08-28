@@ -17,12 +17,13 @@ extends SceneTree
 
 const Report := preload("res://tests/support/report.gd")
 
-## Names chosen so that one keystroke tells the rows apart: only "Zulu" contains
-## a "z", so a filtered list of one proves the text reached the filter. "Quiet"
-## is written without an Exec, to press a row whose launch cannot get past the
-## first guard in _on_app_button_pressed.
+## Names chosen so that one keystroke tells the rows apart: only MATCHES_Z
+## contains a "z", so the rows left after typing one prove the text reached the
+## filter. NO_EXEC is written without an Exec, to press a row whose launch cannot
+## get past the first guard in _on_app_button_pressed.
 const APPS := ["Alpha", "Bravo", "Quiet", "Zulu"]
 const NO_EXEC := "Quiet"
+const MATCHES_Z := "Zulu"
 
 var _report := Report.new()
 var _fixture_dir := ""
@@ -212,7 +213,7 @@ func _initialize() -> void:
 	_report.check("a row that cannot launch still hands focus back",
 			menu.search_bar.has_focus())
 
-	var zulu := _button_for(menu, "Zulu")
+	var zulu := _button_for(menu, MATCHES_Z)
 	zulu.grab_focus()
 	zulu.pressed.emit()
 	await process_frame
@@ -233,10 +234,15 @@ func _initialize() -> void:
 	await process_frame
 	_report.check("the search bar received the keystroke",
 			menu.search_bar.text == "z", menu.search_bar.text)
-	# The row count too, so this covers the filter running and not merely the
-	# character landing in the field.
-	_report.check("the list filtered down to the one matching app",
-			_rows(menu).size() == 1, str(_rows(menu).size()))
+	# The rows too, so this covers the filter running and not merely the character
+	# landing in the field. Named, not counted: a total of one passes just as well
+	# when the filter keeps the wrong row, and a miss here says which app it was.
+	var listed := []
+	for row in _rows(menu):
+		for app_name in APPS:
+			if _has_label(row, app_name):
+				listed.append(app_name)
+	_report.check("only the matching app is left listed", listed == [MATCHES_Z], str(listed))
 
 	_report.section("keys do not reach an unfocused menu")
 	terminal_window.focus()

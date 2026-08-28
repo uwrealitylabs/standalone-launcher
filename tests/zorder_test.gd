@@ -46,8 +46,11 @@ func _initialize() -> void:
 	await process_frame
 
 	_report.section("startup")
-	_report.check("_ready spawns two windows", wm.windows_list.size() == 2,
-			str(wm.windows_list.size()))
+	# The one count asserted outright: what _ready spawns is the thing under test
+	# here. Every count after this is relative to it, so changing _ready fails this
+	# check alone instead of also the spawn and close sections.
+	var startup_count := wm.windows_list.size()
+	_report.check("_ready spawns two windows", startup_count == 2, str(startup_count))
 	# The app browser is the launcher's reason to exist, and nothing else in the
 	# project instantiates it, so losing this line takes the feature out silently.
 	var menu: SWindow = wm.windows_list[0]
@@ -57,13 +60,14 @@ func _initialize() -> void:
 	_report.check("the app menu really instantiated",
 			menu.content_3d.get_scene_instance() != null)
 
-	# WindowManager._ready spawns two windows; a third gives the stack a middle
+	# One more than _ready leaves, so the stack has a middle to reorder through.
 	var w3 := wm.create_window(Vector3(0.0, 1.2, -2.0))
 	await process_frame
 	var wins := wm.windows_list
 
 	_report.section("spawn")
-	_report.check("3 windows exist", wins.size() == 3, str(wins.size()))
+	_report.check("the spawned window joins the stack", wins.size() == startup_count + 1,
+			str(wins.size()))
 	_report.check("all on grid after spawn", wins.all(_on_grid))
 	_report.check("distinct depths after spawn", _distinct_depths(wm))
 	_report.check("last spawned is focused", wm.get_focused_window() == w3)
@@ -121,7 +125,7 @@ func _initialize() -> void:
 	w3.stop_drag()
 	await process_frame
 
-	_report.check("2 windows remain", wm.windows_list.size() == 2,
+	_report.check("the closed window left the stack", wm.windows_list.size() == startup_count,
 			str(wm.windows_list.size()))
 	_report.check("all on grid", wm.windows_list.all(_on_grid))
 	_report.check("distinct depths", _distinct_depths(wm))
