@@ -7,12 +7,10 @@ extends SceneTree
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/resize_handle_test.gd
 ##
-## --xr-mode off is required: without an OpenXR runtime, initialization raises a
-## modal alert that never gets dismissed and the run hangs.
+## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
 ##
-## Adding window.tscn to a headless tree makes the engine print "Viewport
-## Texture must be set to use it" — expected output with no display server, not
-## a failure.
+## The "Viewport Texture must be set to use it" errors are expected with no
+## display server, not failures.
 
 const Report := preload("res://tests/support/report.gd")
 
@@ -118,11 +116,8 @@ func _check_content_still_pickable(win: SWindow) -> void:
 
 ## Asserts each band is as thick as the constants call for at the window's
 ## current size: a fraction of the side it runs along, capped so a large window
-## does not get an unusably wide border.
-##
-## The default size caps the vertical bands at HANDLE_MAX_THICKNESS while the
-## bottom band is still on the ratio; at MIN_CONTENT_SIZE both are on the ratio,
-## so the two calls cover both sides of the cap.
+## does not get an unusably wide border. Call at both a capped and an uncapped
+## size to cover the cap.
 func _check_thickness(win: SWindow, label: String) -> void:
 	var want_tx := minf(SWindow.HANDLE_MAX_THICKNESS,
 			win.content_size.x * SWindow.HANDLE_THICKNESS_RATIO)

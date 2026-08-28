@@ -8,12 +8,10 @@ extends SceneTree
 ## Run with:
 ##   godot --headless --xr-mode off --path . --script res://tests/zorder_test.gd
 ##
-## --xr-mode off is required: without an OpenXR runtime, initialization raises a
-## modal alert that never gets dismissed and the run hangs.
+## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
 ##
-## Adding window.tscn to a headless tree makes the engine print "Viewport
-## Texture must be set to use it" — expected output with no display server, not
-## a failure.
+## The "Viewport Texture must be set to use it" errors are expected with no
+## display server, not failures.
 
 const Report := preload("res://tests/support/report.gd")
 const Fixtures := preload("res://tests/support/window_fixtures.gd")

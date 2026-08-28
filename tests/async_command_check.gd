@@ -6,8 +6,7 @@ extends SceneTree
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/async_command_check.gd
 ##
-## --xr-mode off is required: without an OpenXR runtime, initialization raises a
-## modal alert that never gets dismissed and the run hangs.
+## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
 ##
 ## Unix only: every fixture command is POSIX shell. The suite takes roughly ten
 ## seconds, most of it spent proving that the timeout and cancel paths really do

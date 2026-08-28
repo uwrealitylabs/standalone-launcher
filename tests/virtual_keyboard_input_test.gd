@@ -5,16 +5,16 @@ extends SceneTree
 ## The keyboard reports keys by signal alone. Injecting them into the Input
 ## singleton instead would latch each one as held forever, because a virtual key
 ## carries no matching release, and anything polling Input — the XR simulator's
-## WASD locomotion, any global input handler — would act on it. Run with:
+## WASD locomotion, any global input handler — would act on it.
+##
+## Run with:
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/virtual_keyboard_input_test.gd
 ##
-## --xr-mode off is required: without an OpenXR runtime, initialization raises a
-## modal alert that never gets dismissed and the run hangs.
+## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
 ##
-## Adding window.tscn to a headless tree makes the engine print "Viewport
-## Texture must be set to use it" — expected output with no display server, not
-## a failure.
+## The "Viewport Texture must be set to use it" errors are expected with no
+## display server, not failures.
 
 const Report := preload("res://tests/support/report.gd")
 

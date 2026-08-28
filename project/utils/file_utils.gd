@@ -154,10 +154,9 @@ static func split_list_value(value: String) -> PackedStringArray:
 const _KNOWN_FIELD_CODES := ["f", "F", "u", "U", "d", "D", "n", "N",
 		"i", "c", "k", "v", "m"]
 
-# Codes that expand to nothing here. %f %F %u %U name the documents being
-# opened, and this launcher opens none; %d %D %n %N %v %m are deprecated and
-# carry no value at all; %k is the .desktop file's own path, which
-# parse_desktop_file does not pass on.
+# Codes that expand to nothing here: %f %F %u %U name the documents being
+# opened, and this launcher opens none; %d %D %n %N %v %m are deprecated; %k is
+# the .desktop file's own path, which parsing does not carry through.
 const _EMPTY_FIELD_CODES := ["f", "F", "u", "U", "d", "D", "n", "N", "v", "m", "k"]
 
 # Codes the spec allows only as a whole argument, because each stands for a
@@ -317,8 +316,8 @@ static func _expand_field_codes(token: String, display_name: String) -> String:
 			out += "%"
 		elif code == "c":
 			out += display_name
-		# Every other code expands to nothing. The ones that may not appear here
-		# at all were turned back by _validate_token before this ran.
+		# Every other code expands to nothing. The ones that may not appear in a
+		# larger argument were already turned back by validation.
 
 	return out
 

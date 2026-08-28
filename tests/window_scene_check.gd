@@ -4,15 +4,16 @@ extends SceneTree
 ##
 ## Instantiates the scene without adding it to a tree, so _ready never runs and
 ## every value checked comes straight off the scene file rather than from
-## whatever SWindow would have computed. Run with:
+## whatever SWindow would have computed.
+##
+## Run with:
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/window_scene_check.gd
 ##
-## --xr-mode off is required: without an OpenXR runtime, initialization raises a
-## modal alert that never gets dismissed and the run hangs.
+## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
 ##
-## Instantiating window.tscn with no display server makes the engine print
-## "Viewport Texture must be set to use it" — expected output, not a failure.
+## The "Viewport Texture must be set to use it" errors are expected with no
+## display server, not failures.
 
 const Report := preload("res://tests/support/report.gd")
 const Fixtures := preload("res://tests/support/window_fixtures.gd")
@@ -88,10 +89,8 @@ func _check_resources_unshared(w1: Node3D, w2: Node3D) -> void:
 
 ## Both surfaces must redraw on the cadence window.tscn authors for them.
 ##
-## The window used to borrow its surfaces from the XR Tools virtual keyboard,
-## which authors 15 fps because that is a sensible rate for a keyboard. Reading
-## the rate back here is what catches the surfaces being re-parented onto a
-## scene that carries a cadence of its own.
+## Read back off the scene, so re-parenting a surface onto one that carries a
+## cadence of its own is caught here.
 func _check_redraw_cadence(w: Node3D) -> void:
 	_report.section("redraw cadence")
 	for part in ["Header", "Content"]:

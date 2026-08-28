@@ -7,8 +7,7 @@ extends SceneTree
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/icon_theme_check.gd
 ##
-## --xr-mode off is required: without an OpenXR runtime, initialization raises a
-## modal alert that never gets dismissed and the run hangs.
+## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
 ##
 ## Every check builds its own share root. IconTheme rebuilds its index when the
 ## root changes, so a fresh root is what gives a check a fresh index; reusing

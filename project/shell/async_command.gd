@@ -16,15 +16,14 @@ extends RefCounted
 ## stops one early, so the await always returns. One instance runs one command.
 ##
 ## Godot offers no non-blocking way to read a child's output, so the command is
-## wrapped in a generated script that redirects into a scratch directory, and
-## the result is collected by polling that directory once per frame.
+## wrapped in a generated script that redirects into a scratch directory, which
+## is polled once per frame.
 
 signal finished(result: Dictionary)
 
 ## Carries each new piece of the command's output as it appears. The pieces
-## concatenate to everything the command printed, and a piece can stop mid-line,
-## so a listener must append rather than treat one as a whole line. [signal
-## finished] carries the same text, plus any note the deadline added to it.
+## concatenate to everything the command printed, and one can stop mid-line, so
+## a listener must append rather than treat it as a whole line.
 signal output(chunk: String)
 
 const DEFAULT_TIMEOUT_SEC := 30
@@ -32,9 +31,8 @@ const DEFAULT_TIMEOUT_SEC := 30
 # How long the script waits between asking the command to stop and killing it.
 const _KILL_GRACE_SEC := 2
 
-# How often the output file is checked for new text. Far coarser than the frame
-# rate: the file is reopened each time, and a terminal reads no better for being
-# updated 90 times a second.
+# How often the output file is checked for new text. Deliberately coarser than
+# the frame rate, since the file is reopened on every check.
 const _OUTPUT_POLL_MSEC := 50
 
 # Added to the command's own timeout before this side stops waiting. Only
@@ -57,10 +55,9 @@ var _working_dir := ""
 # characters, because it indexes into the file and not into the decoded text.
 var _streamed := 0
 var _cancel_requested := false
-# A RefCounted whose last reference is dropped takes any coroutine still
-# running inside it, so a caller that forgets its handle would leave both the
-# child process and the scratch directory behind. This holds the object up
-# until the command is done; _finish releases it.
+# Holds this object alive until the command ends, and is released by _finish.
+# Dropping a RefCounted's last reference takes the coroutine running inside it
+# too, stranding the child process and the scratch directory.
 var _keepalive: AsyncCommand = null
 
 
@@ -200,11 +197,9 @@ func _write_script(command: String) -> String:
 ## Builds the shell script that runs `command` and records how it ended.
 func _posix_script(command: String) -> String:
 	# The command sits alone inside a subshell so that nothing it contains can
-	# reach the redirection: written on the same line, a ";" would send only
-	# the last part to the output file, a "#" would comment the redirect out,
-	# and an "exit" would skip the exit-code line and leave the caller waiting
-	# for a file that never arrives. stdin is closed so that a command reading
-	# it sees EOF instead of blocking on a terminal that is not there.
+	# reach the redirection -- written on the same line, a ";", "#" or "exit"
+	# would each break it. stdin is closed so a command reading it sees EOF
+	# instead of blocking on a terminal that is not there.
 	var script := "#!/bin/bash\n(\ncd \"%s\" || exit 1\n%s\n) < /dev/null > \"%s\" 2>&1 &\n" \
 			% [_working_dir, command, _path("out")]
 	script += "child=$!\n"
@@ -231,14 +226,12 @@ func _posix_script(command: String) -> String:
 	script += "[ -n \"$kids\" ] && kill -KILL $kids 2>/dev/null\n"
 	script += ") &\nguard=$!\n"
 
-	# Past this point the only thing the script itself writes to stderr is
-	# bash's notice that a background job was killed, which is expected here and
-	# would otherwise print on the launcher's console after every command.
+	# From here the script's own stderr is only bash's killed-job notice, which
+	# is expected and would otherwise print on the launcher's console.
 	script += "exec 2>/dev/null\n"
 	script += "wait \"$child\"\ncode=$?\nkill \"$guard\" 2>/dev/null\n"
-	# Written under a temporary name and moved into place, because the launcher
-	# treats the file's existence as the signal that the command is over and a
-	# rename is the only way to make it appear already complete.
+	# Renamed into place: the launcher treats this file's existence as the
+	# signal that the command is over, so it must appear already complete.
 	script += "echo \"$code\" > \"%s.part\"\n" % _path("exit")
 	script += "mv \"%s.part\" \"%s\"\n" % [_path("exit"), _path("exit")]
 	return script

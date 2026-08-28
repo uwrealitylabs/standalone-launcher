@@ -7,9 +7,8 @@ const ICON_SIZE := 48
 @onready var scroll_container = $MarginContainer/VBoxContainer/ScrollContainer
 @onready var apps_list = $MarginContainer/VBoxContainer/ScrollContainer/VBoxContainer
 
-# App name -> the entry's Exec, Icon and Categories values. The value type is
-# declared so that anything else is rejected on the way in; caught later, while
-# a row is being built, it would abort _ready and leave the menu empty.
+# App name -> the entry's Exec, Icon and Categories values. Typed so a bad
+# value is rejected on the way in, not halfway through building the list.
 var all_apps: Dictionary[String, Dictionary] = {}
 
 
@@ -127,8 +126,7 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 
 func _on_app_button_pressed(app_data: Dictionary, app_name: String):
 	# A press leaves focus on the row, which would stop the search bar receiving
-	# keys. Taken back ahead of the launch guards below, so that a row which
-	# cannot be launched does not strand focus either.
+	# keys. Ahead of the launch guards, so an unlaunchable row restores it too.
 	search_bar.grab_focus()
 
 	if not app_data.has("Exec"):
@@ -140,16 +138,15 @@ func _on_app_button_pressed(app_data: Dictionary, app_name: String):
 		push_warning("app_registry: nothing to launch for %s" % app_name)
 		return
 
-	# create_process, not execute: execute blocks its caller for the child's
-	# entire lifetime, which would freeze the XR compositor until the launched
-	# application exits.
+	# create_process, not execute: execute blocks until the child exits, which
+	# would freeze the XR compositor for the launched application's lifetime.
 	var pid := OS.create_process(argv[0], argv.slice(1))
 	# On Unix this only catches a failure to fork — the child's exec failing is
 	# reported on the child's own stderr, so a pid is not proof it started.
 	if pid == -1:
 		push_warning("app_registry: could not launch %s" % argv[0])
 		return
-	print("Launching: ", argv, " (pid ", pid, ")")
+	print("Spawned: ", argv, " (pid ", pid, ")")
 
 func _on_search_changed(new_text: String):
 	if new_text == "":

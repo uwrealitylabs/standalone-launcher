@@ -2,20 +2,18 @@ extends SceneTree
 
 ## Verifies that the app browser's search bar can be typed into.
 ##
-## A LineEdit only receives keys while it holds focus inside its own SubViewport,
-## and the launcher has no other focus owner, so the menu used to open deaf to the
-## keyboard. This drives the real window manager rather than the menu alone,
-## because the focus handoff being checked lives in SWindow.set_input_enabled.
+## A LineEdit only receives keys while it holds focus inside its own SubViewport.
+## This drives the real window manager rather than the menu alone, because the
+## focus handoff under test lives in SWindow.set_input_enabled.
+##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/app_search_focus_test.gd
 ##
-## --xr-mode off is required: without an OpenXR runtime, initialization raises a
-## modal alert that never gets dismissed and the run hangs.
+## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
 ##
-## Adding window.tscn to a headless tree makes the engine print "Viewport
-## Texture must be set to use it" — expected output with no display server, not
-## a failure.
+## The "Viewport Texture must be set to use it" errors are expected with no
+## display server, not failures.
 
 const Report := preload("res://tests/support/report.gd")
 
@@ -192,10 +190,8 @@ func _initialize() -> void:
 	_report.check("the focused window's header still ignores the gamepad",
 			not menu_window.header_3d.input_gamepad)
 
-	# Rows must stay focusable. A hardware keyboard is a real input path on the
-	# board -- OpenXR is active there, so SWindow leaves content_3d processing
-	# input and physical keys reach the viewport -- and Tab is how it gets to a
-	# row to launch it with Enter.
+	# Rows must stay focusable: a hardware keyboard is a real input path on the
+	# board, and Tab is how it reaches a row to launch it with Enter.
 	_report.section("rows stay reachable from a hardware keyboard")
 	var gui: Viewport = menu.get_viewport()
 	_press_physical(menu_window, KEY_TAB)
@@ -223,9 +219,8 @@ func _initialize() -> void:
 	_report.check("a row that does launch hands focus back",
 			menu.search_bar.has_focus())
 
-	# Known gap in this design: focus is taken back on `pressed`, which a press
-	# released off the row never emits. Pinned here so the behaviour is a
-	# recorded trade-off rather than a surprise.
+	# Focus is taken back on `pressed`, which a press released off the row never
+	# emits. Pinned so the gap stays a recorded trade-off rather than a surprise.
 	_report.section("known gap: a press released off the row")
 	zulu.grab_focus()
 	await process_frame
@@ -238,8 +233,8 @@ func _initialize() -> void:
 	await process_frame
 	_report.check("the search bar received the keystroke",
 			menu.search_bar.text == "z", menu.search_bar.text)
-	# Asserting the row count as well, so the check covers the filter running and
-	# not merely the character landing in the field.
+	# The row count too, so this covers the filter running and not merely the
+	# character landing in the field.
 	_report.check("the list filtered down to the one matching app",
 			_rows(menu).size() == 1, str(_rows(menu).size()))
 

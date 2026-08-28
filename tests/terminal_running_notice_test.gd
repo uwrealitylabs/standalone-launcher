@@ -7,8 +7,7 @@ extends SceneTree
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/terminal_running_notice_test.gd
 ##
-## --xr-mode off is required: without an OpenXR runtime, initialization raises a
-## modal alert that never gets dismissed and the run hangs.
+## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
 ##
 ## Unix only: the fixture commands are POSIX shell. The cancel case spends a few
 ## seconds proving the notice goes away on that path too.

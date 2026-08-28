@@ -70,9 +70,8 @@ func _clear_running_notice() -> void:
 	_running_line = -1
 
 
-## Writes a piece of a running command's output. Pieces can stop mid-line, so
-## this appends rather than writing whole lines, and it takes the text as-is:
-## output that happens to contain BBCode is shown, not interpreted.
+## Appends a piece of a running command's output. A piece can stop mid-line,
+## and the text is shown as-is: BBCode inside it is not interpreted.
 func _show_output(chunk: String) -> void:
 	if chunk == "":
 		return
@@ -97,12 +96,9 @@ func _change_dir(arg: String) -> void:
 			return
 		target = _previous_dir
 
-	# Known issue: the rest of the line is taken as part of the path, so
-	# "cd ..; pwd" looks for a directory named "..; pwd" and reports it missing.
-	# Left that way on purpose: passing the line to a shell instead would run it
-	# in a subshell that is then discarded, so pwd would print the parent as
-	# though the move had worked, while current_dir stayed put and the next
-	# command still ran here - trading a loud failure for a silent wrong one.
+	# The whole argument is one path, so "cd ..; pwd" looks for a directory
+	# named "..; pwd" and reports it missing. Deliberate: handing the line to a
+	# shell would move only a throwaway subshell, failing silently instead.
 	var resolved := _resolve_dir(target)
 	if not DirAccess.dir_exists_absolute(resolved):
 		stdout("[color=red]Directory not found: " + resolved + "[/color]")
@@ -157,13 +153,9 @@ func _on_submit(cmd: String) -> void:
 
 	# run command asynchronously
 	is_running = true
-	# Noted before the notice is printed, so it can be taken back out once the
-	# command ends. Everything printed while the command runs lands below it, so
-	# the index still points at the notice by then.
-	#
-	# The notice has to stay alone in its paragraph for that removal to be safe.
-	# stdout ends every line it writes, and _show_output takes the notice out
-	# before adding anything, so nothing ever joins it.
+	# Noted before the notice is printed so it can be removed once the command
+	# ends: everything printed meanwhile lands below it, so the index stays
+	# valid. Removal is by paragraph, and the notice never shares one.
 	_running_line = output_display.get_paragraph_count() - 1
 	stdout("[color=yellow]Running...[/color]")
 
@@ -181,9 +173,8 @@ func _on_submit(cmd: String) -> void:
 	# and a command stopped part-way still gets to keep what it printed.
 	_show_output(result.output.substr(_shown))
 	_clear_running_notice()
-	# Output that stopped mid-line would otherwise share its paragraph with the
-	# line below, which both reads wrongly and breaks the one-line-per-paragraph
-	# layout the notice depends on.
+	# Close a mid-line tail, or it shares a paragraph with the line below and
+	# breaks the one-line-per-paragraph layout the notice depends on.
 	if _shown > 0 and not result.output.ends_with("\n"):
 		output_display.add_text("\n")
 
