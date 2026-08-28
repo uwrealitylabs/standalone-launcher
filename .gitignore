@@ -24,3 +24,6 @@ build/
 
 # Coding agent instructions
 CLAUDE.md
+
+# macOS folder metadata
+.DS_Store
