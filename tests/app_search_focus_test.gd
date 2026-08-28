@@ -155,6 +155,12 @@ func _initialize() -> void:
 	_report.check("every fixture app has a row", _rows(menu).size() == APPS.size(),
 			str(_rows(menu).size()))
 
+	var terminal_window: SWindow = null
+	for win in wm.windows_list:
+		if win != menu_window:
+			terminal_window = win
+	_report.check("a second window exists to compare against", terminal_window != null)
+
 	# The terminal is spawned last, so it is the focused window at startup. The
 	# search bar still holds GUI focus, which is per-viewport and independent.
 	_report.section("focus at startup")
@@ -168,6 +174,23 @@ func _initialize() -> void:
 	await process_frame
 	_report.check("the menu is now the focused window",
 			wm.get_focused_window() == menu_window)
+
+	# Both of a window's viewports are gated, not just the content one: the
+	# header shares the window's keyboard, so an ungated one would keep taking
+	# physical keys for every window at once.
+	_report.section("keyboard routing follows the focused window")
+	_report.check("the focused window's content takes keys",
+			menu_window.content_3d.input_keyboard)
+	_report.check("the focused window's header takes keys",
+			menu_window.header_3d.input_keyboard)
+	_report.check("the unfocused window's content does not",
+			not terminal_window.content_3d.input_keyboard)
+	_report.check("the unfocused window's header does not",
+			not terminal_window.header_3d.input_keyboard)
+	# The header's gamepad flag is deliberately left as authored. It is off by
+	# default and the scene does not override it, so gating it would turn it on.
+	_report.check("the focused window's header still ignores the gamepad",
+			not menu_window.header_3d.input_gamepad)
 
 	# Rows must stay focusable. A hardware keyboard is a real input path on the
 	# board -- OpenXR is active there, so SWindow leaves content_3d processing
@@ -221,10 +244,6 @@ func _initialize() -> void:
 			_rows(menu).size() == 1, str(_rows(menu).size()))
 
 	_report.section("keys do not reach an unfocused menu")
-	var terminal_window: SWindow = null
-	for win in wm.windows_list:
-		if win != menu_window:
-			terminal_window = win
 	terminal_window.focus()
 	await process_frame
 	kb.on_key_pressed("Q", 113, false)
