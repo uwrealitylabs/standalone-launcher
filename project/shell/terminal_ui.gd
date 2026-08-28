@@ -8,6 +8,8 @@ var current_dir: String = OS.get_executable_path().get_base_dir()
 var is_running: bool = false
 
 var _current: AsyncCommand = null
+# Paragraph holding the "Running..." notice, or -1 when none is showing.
+var _running_line := -1
 
 
 func _ready():
@@ -48,9 +50,19 @@ func _exit_tree() -> void:
 		_current.cancel()
 
 
+## Appends `text` to the output as a whole line. Writing to the output any other
+## way breaks the one-line-per-paragraph layout the rest of this script assumes.
 func stdout(text: String):
 	output_display.append_text(text + "\n")
 	output_display.scroll_to_line(output_display.get_line_count())
+
+
+## Removes the "Running..." notice from the output, if one is showing.
+func _clear_running_notice() -> void:
+	if _running_line < 0:
+		return
+	output_display.remove_paragraph(_running_line)
+	_running_line = -1
 
 
 func _on_submit(cmd: String) -> void:
@@ -86,6 +98,14 @@ func _on_submit(cmd: String) -> void:
 
 	# run command asynchronously
 	is_running = true
+	# Noted before the "Running..." notice is printed, so it can be taken back out once the
+	# command ends. Everything printed while the command runs lands below it, so
+	# the index still points at the notice by then.
+	#
+	# This depends on every write to the output ending in a newline, which leaves
+	# the "Running..." notice alone in a paragraph of its own. Anything that writes without
+	# a newline would share a paragraph with the notice, and clearing it would take that text too.
+	_running_line = output_display.get_paragraph_count() - 1
 	stdout("[color=yellow]Running...[/color]")
 
 	_current = AsyncCommand.new()
@@ -95,6 +115,7 @@ func _on_submit(cmd: String) -> void:
 	var limit := _current.timeout_sec
 	_current = null
 	is_running = false
+	_clear_running_notice()
 
 	# Whatever the command managed to print comes first, even when it was
 	# stopped part-way, and is then followed by exactly one line saying how it
