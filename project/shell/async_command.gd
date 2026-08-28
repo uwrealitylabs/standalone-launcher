@@ -9,6 +9,9 @@ extends RefCounted
 ##     var result = await cmd.finished   # {"output", "exit_code",
 ##                                       #  "timed_out", "cancelled"}
 ##
+## Output also arrives as it is produced, on [signal output], for a caller that
+## wants to show a long command's progress rather than wait for all of it.
+##
 ## A command that never ends is stopped at `timeout_sec`, and [method cancel]
 ## stops one early, so the await always returns. One instance runs one command.
 ##
@@ -18,10 +21,21 @@ extends RefCounted
 
 signal finished(result: Dictionary)
 
+## Carries each new piece of the command's output as it appears. The pieces
+## concatenate to everything the command printed, and a piece can stop mid-line,
+## so a listener must append rather than treat one as a whole line. [signal
+## finished] carries the same text, plus any note the deadline added to it.
+signal output(chunk: String)
+
 const DEFAULT_TIMEOUT_SEC := 30
 
 # How long the script waits between asking the command to stop and killing it.
 const _KILL_GRACE_SEC := 2
+
+# How often the output file is checked for new text. Far coarser than the frame
+# rate: the file is reopened each time, and a terminal reads no better for being
+# updated 90 times a second.
+const _OUTPUT_POLL_MSEC := 50
 
 # Added to the command's own timeout before this side stops waiting. Only
 # reached when the script itself dies without writing an exit code, since the
@@ -39,6 +53,9 @@ static var _serial := 0
 
 var _workspace := ""
 var _working_dir := ""
+# Bytes of the output file already sent on [signal output]. Bytes rather than
+# characters, because it indexes into the file and not into the decoded text.
+var _streamed := 0
 var _cancel_requested := false
 # A RefCounted whose last reference is dropped takes any coroutine still
 # running inside it, so a caller that forgets its handle would leave both the
@@ -90,11 +107,20 @@ func _wait_for(command: String) -> void:
 	var exit_path := _path("exit")
 	var backstop := Time.get_ticks_msec() + (timeout_sec + _BACKSTOP_GRACE_SEC) * 1000
 	var backstopped := false
+	var next_poll := 0
 	while not FileAccess.file_exists(exit_path):
 		if Time.get_ticks_msec() > backstop:
 			backstopped = true
 			break
+		if Time.get_ticks_msec() >= next_poll:
+			next_poll = Time.get_ticks_msec() + _OUTPUT_POLL_MSEC
+			_stream_new_output()
 		await Engine.get_main_loop().process_frame
+
+	# The command gets to print between the last poll and its exit, and the exit
+	# file only appears once it is done, so this last look is what makes the
+	# streamed pieces add up to the whole output.
+	_stream_new_output()
 
 	var output := _read(_path("out"))
 	var exit_code := -1
@@ -106,6 +132,25 @@ func _wait_for(command: String) -> void:
 
 	_finish(output, exit_code,
 			backstopped or FileAccess.file_exists(_path("timeout")))
+
+
+## Sends whatever has been appended to the output file since the last call.
+func _stream_new_output() -> void:
+	var file := FileAccess.open(_path("out"), FileAccess.READ)
+	if file == null:
+		return
+	var length := file.get_length()
+	if length <= _streamed:
+		file.close()
+		return
+	file.seek(_streamed)
+	# get_buffer, rather than get_as_text, because only this reads from the
+	# seek position: the text form starts over at the top of the file.
+	var chunk := file.get_buffer(length - _streamed).get_string_from_utf8()
+	file.close()
+	_streamed = length
+	if chunk != "":
+		output.emit(chunk)
 
 
 func _read(path: String) -> String:

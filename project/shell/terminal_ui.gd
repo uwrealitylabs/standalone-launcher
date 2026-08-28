@@ -12,6 +12,9 @@ var _current: AsyncCommand = null
 var _running_line := -1
 # Where "cd -" goes back to. Empty until the first successful cd.
 var _previous_dir := ""
+# Characters of the running command's output already on screen, so the tail
+# that arrives after the last poll can be told apart from what was shown live.
+var _shown := 0
 
 
 func _ready():
@@ -65,6 +68,19 @@ func _clear_running_notice() -> void:
 		return
 	output_display.remove_paragraph(_running_line)
 	_running_line = -1
+
+
+## Writes a piece of a running command's output. Pieces can stop mid-line, so
+## this appends rather than writing whole lines, and it takes the text as-is:
+## output that happens to contain BBCode is shown, not interpreted.
+func _show_output(chunk: String) -> void:
+	if chunk == "":
+		return
+	# Output arriving is itself proof the command is running.
+	_clear_running_notice()
+	output_display.add_text(chunk)
+	output_display.scroll_to_line(output_display.get_line_count())
+	_shown += chunk.length()
 
 
 ## Applies a `cd` argument to `current_dir`, reporting where it ended up or why
@@ -141,39 +157,46 @@ func _on_submit(cmd: String) -> void:
 
 	# run command asynchronously
 	is_running = true
-	# Noted before the "Running..." notice is printed, so it can be taken back out once the
+	# Noted before the notice is printed, so it can be taken back out once the
 	# command ends. Everything printed while the command runs lands below it, so
 	# the index still points at the notice by then.
 	#
-	# This depends on every write to the output ending in a newline, which leaves
-	# the "Running..." notice alone in a paragraph of its own. Anything that writes without
-	# a newline would share a paragraph with the notice, and clearing it would take that text too.
+	# The notice has to stay alone in its paragraph for that removal to be safe.
+	# stdout ends every line it writes, and _show_output takes the notice out
+	# before adding anything, so nothing ever joins it.
 	_running_line = output_display.get_paragraph_count() - 1
 	stdout("[color=yellow]Running...[/color]")
 
+	_shown = 0
 	_current = AsyncCommand.new()
+	_current.output.connect(_show_output)
 	_current.start(current_dir, cmd)
 	var result: Dictionary = await _current.finished
 
 	var limit := _current.timeout_sec
 	_current = null
 	is_running = false
+
+	# The last poll can miss whatever the command printed just before it ended,
+	# and a command stopped part-way still gets to keep what it printed.
+	_show_output(result.output.substr(_shown))
 	_clear_running_notice()
+	# Output that stopped mid-line would otherwise share its paragraph with the
+	# line below, which both reads wrongly and breaks the one-line-per-paragraph
+	# layout the notice depends on.
+	if _shown > 0 and not result.output.ends_with("\n"):
+		output_display.add_text("\n")
 
-	# Whatever the command managed to print comes first, even when it was
-	# stopped part-way, and is then followed by exactly one line saying how it
-	# ended. A stopped command's exit code only says which signal stopped it,
-	# so it is not worth showing.
-	var body: String = result.output.strip_edges()
-	if body != "":
-		stdout(body if result.exit_code == 0 else "[color=red]" + body + "[/color]")
-
+	# Exactly one line saying how the command ended. A stopped command's exit
+	# code only says which signal stopped it, so it is not worth showing.
 	if result.cancelled:
 		stdout("[color=yellow]Cancelled.[/color]")
 	elif result.timed_out:
 		stdout("[color=red]Stopped after " + str(limit) + "s.[/color]")
-	elif body == "":
+	elif _shown == 0:
 		if result.exit_code == 0:
 			stdout("[color=green]Done (exit code 0)[/color]")
 		else:
 			stdout("[color=red]No output. Exit code: " + str(result.exit_code) + "[/color]")
+	elif result.exit_code != 0:
+		stdout("[color=red]Exit code: " + str(result.exit_code) + "[/color]")

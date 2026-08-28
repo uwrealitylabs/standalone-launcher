@@ -36,6 +36,7 @@ func _run() -> void:
 	await _check_redirect_containment()
 	await _check_working_directory()
 	await _check_stdin_is_closed()
+	await _check_output_streams()
 	await _check_timeout()
 	await _check_cancel()
 	await _check_dropped_reference()
@@ -104,6 +105,35 @@ func _check_stdin_is_closed() -> void:
 	var elapsed := Time.get_ticks_msec() - started
 	_report.check("a stdin reader finishes on its own", elapsed < 5000, "%dms" % elapsed)
 	_report.check("a stdin reader exits cleanly", r.exit_code == 0, str(r))
+
+
+## Output has to reach the caller while the command is still running, and the
+## pieces have to add up to exactly what the finished result reports.
+func _check_output_streams() -> void:
+	_report.section("streaming output")
+	var cmd := AsyncCommand.new()
+	var chunks: Array = []
+	cmd.output.connect(func(chunk: String) -> void: chunks.append(chunk))
+	cmd.start("/tmp", "echo early; sleep 2; echo late", 10)
+
+	await create_timer(1.0).timeout
+	var midway := _joined(chunks)
+	_report.check("output arrives before the command has ended",
+			midway.contains("early"), midway)
+	_report.check("output still to come has not arrived early",
+			not midway.contains("late"), midway)
+
+	var r: Dictionary = await cmd.finished
+	_report.check("the pieces add up to the whole output",
+			_joined(chunks) == r.output, "%s vs %s" % [_joined(chunks), r.output])
+	_check_no_workspaces_left("after a streamed command")
+
+
+func _joined(chunks: Array) -> String:
+	var text := ""
+	for chunk in chunks:
+		text += chunk
+	return text
 
 
 func _check_timeout() -> void:
