@@ -152,10 +152,11 @@ func _on_window_focused(win: SWindow) -> void:
 
 func _ready() -> void:
 	# TEMP: hardcoded startup windows, pending a real session/launcher flow
-	# Wider/taller than the default window size: app names and category text
-	# get cut off at the default 1.5x0.75.
+	# Browse-friendly size for the application list.
 	create_window(Vector3(-0.3, 1.5, -2.0),
 			load("res://project/launch_service/application_menu.tscn")).resize(Vector2(2.4, 1.4))
+	# TODO: Make terminal_ui's fixed-size children fill the viewport and let its
+	# output expand vertically before choosing a new terminal startup size.
 	create_window(Vector3(0.3, 1.5, -2.0), load("res://project/shell/terminal_ui.tscn"))
 	
 	create_keyboard()

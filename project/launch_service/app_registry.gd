@@ -94,6 +94,9 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	# add app name
 	var name_label = Label.new()
 	name_label.text = app_name
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.clip_text = true
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_label.add_theme_font_size_override("font_size", 18)
 	vbox.add_child(name_label)
 	
@@ -103,14 +106,17 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 		# "Utility;Audio\;Video;" reads as two categories, so it is split on the
 		# real separators and rejoined rather than having its ";" replaced.
 		categories_label.text = ", ".join(FileUtils.split_list_value(app_data["Categories"]))
+		categories_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		categories_label.clip_text = true
+		categories_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		categories_label.add_theme_font_size_override("font_size", 12)
 		categories_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 		vbox.add_child(categories_label)
-		
-		# spacer
-		var right_spacer = Control.new()
-		right_spacer.custom_minimum_size.x = 20
-		hbox.add_child(right_spacer)
+
+	# Keep the same right padding whether or not this row has category text.
+	var right_spacer = Control.new()
+	right_spacer.custom_minimum_size.x = 20
+	hbox.add_child(right_spacer)
 	
 	# Make the whole panel clickable
 	var button = Button.new()
