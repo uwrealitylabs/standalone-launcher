@@ -333,6 +333,12 @@ func stop_resize() -> void:
 	_apply_size(content_size)
 
 
+## Resizes the window's content to `size`, clamped to MIN/MAX_CONTENT_SIZE.
+## For a one-off resize outside of a pointer drag, e.g. at creation.
+func resize(size: Vector2) -> void:
+	_apply_size(size)
+
+
 ## Resizes the window's content to `new_size`, clamped to MIN/MAX_CONTENT_SIZE,
 ## and brings the header and both screens' geometry with it.
 ##

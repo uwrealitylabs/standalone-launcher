@@ -152,8 +152,10 @@ func _on_window_focused(win: SWindow) -> void:
 
 func _ready() -> void:
 	# TEMP: hardcoded startup windows, pending a real session/launcher flow
+	# Wider/taller than the default window size: app names and category text
+	# get cut off at the default 1.5x0.75.
 	create_window(Vector3(-0.3, 1.5, -2.0),
-			load("res://project/launch_service/application_menu.tscn"))
+			load("res://project/launch_service/application_menu.tscn")).resize(Vector2(2.4, 1.4))
 	create_window(Vector3(0.3, 1.5, -2.0), load("res://project/shell/terminal_ui.tscn"))
 	
 	create_keyboard()
