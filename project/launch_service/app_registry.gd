@@ -1,27 +1,45 @@
 extends Node
 
+## Side length of an app row's icon, and the size icons are requested at.
+const ICON_SIZE := 48
+
 @onready var search_bar = $MarginContainer/VBoxContainer/LineEdit
 @onready var scroll_container = $MarginContainer/VBoxContainer/ScrollContainer
 @onready var apps_list = $MarginContainer/VBoxContainer/ScrollContainer/VBoxContainer
 
-var all_apps = {}
+# App name -> the entry's Exec, Icon and Categories values. Typed so a bad
+# value is rejected on the way in, not halfway through building the list.
+var all_apps: Dictionary[String, Dictionary] = {}
 
-	
+
 func _ready():
-	var all_files = FileUtils.get_all_file_paths("/usr/share/applications")
+	var all_files = FileUtils.get_all_file_paths(FileUtils.applications_dir())
 	for file_path in all_files:
-			var desktop_data = FileUtils.parse_desktop_file(file_path)
-			for app_name in desktop_data:
-					all_apps[app_name] = desktop_data[app_name]
-	
+		var desktop_data := FileUtils.parse_desktop_file(file_path)
+		for app_name in desktop_data:
+			all_apps[app_name] = desktop_data[app_name]
+
+
 	# UI Initilzation
-	search_bar.placehotgilder_text = "Search applications..."
+	search_bar.placeholder_text = "Search applications..."
 	search_bar.text_changed.connect(_on_search_changed)
 	
 	# Add apps to UI
 	populate_apps(all_apps)
 
-func populate_apps(apps_to_show: Dictionary):
+	# A LineEdit only receives keys while it holds focus, and nothing else claims
+	# it, so without this the menu opens deaf to the keyboard.
+	search_bar.grab_focus()
+
+
+## Focus hook for the containing window. Returns the caret to the search bar so
+## the list can be filtered by typing.
+func on_window_focus_changed(focused: bool) -> void:
+	if focused:
+		search_bar.grab_focus()
+
+
+func populate_apps(apps_to_show: Dictionary[String, Dictionary]):
 	# Clear existing content
 	for child in apps_list.get_children():
 		child.queue_free()
@@ -33,14 +51,13 @@ func populate_apps(apps_to_show: Dictionary):
 	# Create list item for each app
 	for app_name in sorted_apps:
 		var app_data = apps_to_show[app_name]
-		print(app_name,app_data)
 		var app_item = create_app_list_item(app_name, app_data)
 		apps_list.add_child(app_item)
 
 func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContainer:
 	# panel container as a background
 	var panel = PanelContainer.new()
-	panel.custom_minimum_size = Vector2(1000, 60)  
+	panel.custom_minimum_size = Vector2(0, 60)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
 	# Main horizontal container
@@ -55,13 +72,13 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	
 	# Icon on the left of the panel
 	var icon_rect = TextureRect.new()
-	icon_rect.custom_minimum_size = Vector2(48, 48)
+	icon_rect.custom_minimum_size = Vector2(ICON_SIZE, ICON_SIZE)
 	icon_rect.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
 	icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	
 	# try and load icons
 	if app_data.has("Icon"):
-		var icon_texture = FileUtils.load_icon(app_data["Icon"])
+		var icon_texture = IconTheme.load_icon(app_data["Icon"], ICON_SIZE)
 		if icon_texture:
 			icon_rect.texture = icon_texture
 			
@@ -77,50 +94,71 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	# add app name
 	var name_label = Label.new()
 	name_label.text = app_name
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.clip_text = true
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	name_label.add_theme_font_size_override("font_size", 18)
 	vbox.add_child(name_label)
 	
 	# add categories text
 	if app_data.has("Categories"):
 		var categories_label = Label.new()
-		var categories_text = app_data["Categories"].replace(";", ", ").trim_suffix(", ")
-		categories_label.text = categories_text
+		# "Utility;Audio\;Video;" reads as two categories, so it is split on the
+		# real separators and rejoined rather than having its ";" replaced.
+		categories_label.text = ", ".join(FileUtils.split_list_value(app_data["Categories"]))
+		categories_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		categories_label.clip_text = true
+		categories_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		categories_label.add_theme_font_size_override("font_size", 12)
 		categories_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 		vbox.add_child(categories_label)
-		
-		# spacer
-		var right_spacer = Control.new()
-		right_spacer.custom_minimum_size.x = 20
-		hbox.add_child(right_spacer)
+
+	# Keep the same right padding whether or not this row has category text.
+	var right_spacer = Control.new()
+	right_spacer.custom_minimum_size.x = 20
+	hbox.add_child(right_spacer)
 	
 	# Make the whole panel clickable
 	var button = Button.new()
 	button.flat = true  # make an Invisible button over the panel
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	button.pressed.connect(_on_app_button_pressed.bind(app_data))
+	button.pressed.connect(_on_app_button_pressed.bind(app_data, app_name))
 	
 	# Add the button as an overlay
 	panel.add_child(button)
 	
 	return panel
 
-func _on_app_button_pressed(app_data: Dictionary):
-	if app_data.has("Exec"):
-		var exec_command = app_data["Exec"]
-		# Clean up the exec command (remove %U, %F, etc.)
-		exec_command = exec_command.replace("%U", "").replace("%F", "").replace("%u", "").replace("%f", "").strip_edges()
-		
-		# Launch the application
-		OS.execute(exec_command, [], [], false)
-		print("Launching: ", exec_command)
+func _on_app_button_pressed(app_data: Dictionary, app_name: String):
+	# A press leaves focus on the row, which would stop the search bar receiving
+	# keys. Ahead of the launch guards, so an unlaunchable row restores it too.
+	search_bar.grab_focus()
+
+	if not app_data.has("Exec"):
+		return
+
+	var argv := FileUtils.parse_exec(app_data["Exec"], app_name, app_data.get("Icon", ""))
+	# parse_exec has already warned with the specific fault, if there was one.
+	if argv.is_empty():
+		push_warning("app_registry: nothing to launch for %s" % app_name)
+		return
+
+	# create_process, not execute: execute blocks until the child exits, which
+	# would freeze the XR compositor for the launched application's lifetime.
+	var pid := OS.create_process(argv[0], argv.slice(1))
+	# On Unix this only catches a failure to fork — the child's exec failing is
+	# reported on the child's own stderr, so a pid is not proof it started.
+	if pid == -1:
+		push_warning("app_registry: could not launch %s" % argv[0])
+		return
+	print("Spawned: ", argv, " (pid ", pid, ")")
 
 func _on_search_changed(new_text: String):
 	if new_text == "":
 		populate_apps(all_apps)
 	else:
-		var filtered_apps = {}
+		var filtered_apps: Dictionary[String, Dictionary] = {}
 		for app_name in all_apps:
 			if app_name.to_lower().contains(new_text.to_lower()):
 				filtered_apps[app_name] = all_apps[app_name]

@@ -53,6 +53,8 @@ jobs:
 
       # --xr-mode off: the runner has no OpenXR runtime, and initialization
       # failure otherwise raises a modal alert that never gets dismissed.
+      # Helpers live in tests/support/, which tests/*.gd does not match -- only
+      # suites are run.
       - name: Run tests
         run: |
           set -uo pipefail
@@ -61,9 +63,11 @@ jobs:
             name="$(basename "$test")"
             echo "::group::$name"
             if godot --headless --xr-mode off --script "res://$test" 2>&1 | tee "/tmp/$name.log"; then
-              # Some checks report a failure without changing the exit code.
-              if grep -q 'FAIL' "/tmp/$name.log"; then
-                echo "::error file=$test::$name reported failing checks"
+              # Every suite signs off through tests/support/report.gd. A missing
+              # sign-off means failing checks, or a suite that died part-way and
+              # never reached its summary at all.
+              if ! grep -qF 'PASS - all checks passed' "/tmp/$name.log"; then
+                echo "::error file=$test::$name did not report a clean pass"
                 status=1
               fi
             else

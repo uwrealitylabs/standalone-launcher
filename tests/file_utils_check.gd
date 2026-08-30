@@ -1,0 +1,346 @@
+extends SceneTree
+
+## Verifies FileUtils' .desktop parsing and directory walking against fixtures
+## written to user:// at run time.
+##
+## Run with:
+##   godot --headless --xr-mode off --path . \
+##       --script res://tests/file_utils_check.gd
+##
+## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
+##
+## The unreadable-file and malformed-Exec checks deliberately trigger
+## push_warning; those warnings in the log are expected output, not failures.
+
+const Report := preload("res://tests/support/report.gd")
+
+var _fixture_dir := ""
+var _report := Report.new()
+
+
+func _initialize() -> void:
+	_fixture_dir = OS.get_user_data_dir() + "/file_utils_check"
+	_teardown()  # a previous aborted run may have left the directory behind
+	DirAccess.make_dir_recursive_absolute(_fixture_dir + "/nested")
+
+	_check_unreadable_file_is_survivable()
+	_check_entry_fields_parsed()
+	_check_hidden_entries_skipped()
+	_check_directory_walk()
+	_check_key_order_independent()
+	_check_value_decoding()
+	_check_exec_parsing()
+	_check_share_dir_override()
+
+	_teardown()
+	_report.finish(self)
+
+
+## A file that cannot be opened must yield an empty dictionary, not a crash.
+func _check_unreadable_file_is_survivable() -> void:
+	_report.section("unreadable file")
+	var missing := _fixture_dir + "/does_not_exist.desktop"
+	var parsed := FileUtils.parse_desktop_file(missing)
+	_report.check("missing file returns an empty dictionary", parsed.is_empty(), str(parsed))
+
+
+## Name keys the result; Exec, Icon and Categories are carried through.
+func _check_entry_fields_parsed() -> void:
+	_report.section("entry fields")
+	var path := _write_fixture("valid.desktop", [
+		"[Desktop Entry]",
+		"Type=Application",
+		"Name=Test App",
+		"Exec=/bin/echo hello",
+		"Icon=test-icon",
+		"Categories=Utility;Development;",
+		"Terminal=false",
+		"NoDisplay=false",
+	])
+	var parsed := FileUtils.parse_desktop_file(path)
+	_report.check("entry is keyed by Name", parsed.has("Test App"), str(parsed.keys()))
+	if not parsed.has("Test App"):
+		return
+	var app: Dictionary = parsed["Test App"]
+	_report.check("Exec parsed", app.get("Exec", "") == "/bin/echo hello", str(app.get("Exec", "")))
+	_report.check("Icon parsed", app.get("Icon", "") == "test-icon", str(app.get("Icon", "")))
+	_report.check("Categories parsed", app.get("Categories", "") == "Utility;Development;",
+			str(app.get("Categories", "")))
+
+
+## Terminal=true and NoDisplay=true entries are not offered to the launcher.
+func _check_hidden_entries_skipped() -> void:
+	_report.section("hidden entries")
+	var terminal := _write_fixture("terminal.desktop", [
+		"[Desktop Entry]",
+		"Name=Terminal App",
+		"Exec=/bin/echo hi",
+		"Terminal=true",
+	])
+	_report.check("Terminal=true entry is skipped",
+			FileUtils.parse_desktop_file(terminal).is_empty())
+
+	var hidden := _write_fixture("hidden.desktop", [
+		"[Desktop Entry]",
+		"Name=Hidden App",
+		"Exec=/bin/echo hi",
+		"NoDisplay=true",
+	])
+	_report.check("NoDisplay=true entry is skipped",
+			FileUtils.parse_desktop_file(hidden).is_empty())
+
+
+## The walk must recurse into subdirectories and return paths that are openable
+## as-is. Both hang on the separator: FileAccess normalizes a "\" but DirAccess
+## does not, so a wrong separator loses whole subtrees while still looking fine
+## on the files it did find.
+func _check_directory_walk() -> void:
+	_report.section("directory walk")
+	var deep := _write_fixture("nested/deep.desktop", ["[Desktop Entry]", "Name=Deep App"])
+	var top := _write_fixture("walked.desktop", ["[Desktop Entry]", "Name=Walked App"])
+	var found := FileUtils.get_all_file_paths(_fixture_dir)
+	# Named, not counted: every check shares _fixture_dir, so a total would fail
+	# here whenever an unrelated one gained a fixture, and blame the walk for it.
+	_report.check("the walk finds a file in the root", top in found, str(found))
+	_report.check("the walk recurses into subdirectories", deep in found, str(found))
+	var all_readable := true
+	for path in found:
+		if not FileAccess.file_exists(path):
+			all_readable = false
+			print("    unreadable: ", path)
+	_report.check("every returned path is readable as returned", all_readable)
+
+
+## The spec fixes no key order, so an entry whose keys are sorted puts Exec,
+## Icon and Categories ahead of Name and all of them must still land.
+func _check_key_order_independent() -> void:
+	_report.section("key order")
+	var path := _write_fixture("alpha.desktop", [
+		"[Desktop Entry]",
+		"Categories=Utility;",
+		"Exec=/usr/bin/alpha %U",
+		"Icon=alpha-icon",
+		"Name=Alpha",
+		"Type=Application",
+	])
+	var app: Dictionary = FileUtils.parse_desktop_file(path).get("Alpha", {})
+	_report.check("Exec survives ahead of Name",
+			app.get("Exec", "") == "/usr/bin/alpha %U", str(app))
+	_report.check("Categories survives ahead of Name",
+			app.get("Categories", "") == "Utility;", str(app))
+	_report.check("Icon survives ahead of Name", app.get("Icon", "") == "alpha-icon", str(app))
+
+	# Parsing one file must carry no state into the next: this entry names no
+	# Icon, so it must come back without one whatever the file before it held.
+	var bare := _write_fixture("bare.desktop", [
+		"[Desktop Entry]", "Name=Bare", "Exec=/bin/bare",
+	])
+	var bare_app: Dictionary = FileUtils.parse_desktop_file(bare).get("Bare", {})
+	_report.check("no icon leaks in from the previous file", not bare_app.has("Icon"),
+			str(bare_app))
+
+	var unnamed := _write_fixture("unnamed.desktop", [
+		"[Desktop Entry]", "Name=", "Exec=/bin/foo", "Icon=ico",
+	])
+	_report.check("an empty Name yields no entry",
+			FileUtils.parse_desktop_file(unnamed).is_empty())
+
+
+## Values carry their own "=", and are unescaped before any key-specific rule.
+func _check_value_decoding() -> void:
+	_report.section("value decoding")
+	var path := _write_fixture("escapes.desktop", [
+		"[Desktop Entry]",
+		"Name=Escapes",
+		"Exec=env FOO=1 /bin/app --tab=new",
+		"Icon=a\\sb",
+		"Categories=Utility;Audio\\;Video;",
+	])
+	var app: Dictionary = FileUtils.parse_desktop_file(path).get("Escapes", {})
+	_report.check("a value keeps everything past its first =",
+			app.get("Exec", "") == "env FOO=1 /bin/app --tab=new",
+			str(app.get("Exec", "")))
+	_report.check("\\s decodes to a space", app.get("Icon", "") == "a b",
+			str(app.get("Icon", "")))
+	var cats := FileUtils.split_list_value(app.get("Categories", ""))
+	_report.check("an escaped ; stays inside its element",
+			cats == PackedStringArray(["Utility", "Audio;Video"]), str(cats))
+
+	# Wine writes Windows paths into Exec, and none of those backslashes are
+	# escapes the spec defines.
+	var wine := _write_fixture("wine.desktop", [
+		"[Desktop Entry]", "Name=Wine", "Exec=wine C:\\Program\\app.exe",
+	])
+	var wine_app: Dictionary = FileUtils.parse_desktop_file(wine).get("Wine", {})
+	_report.check("an unrecognized escape is left alone",
+			wine_app.get("Exec", "") == "wine C:\\Program\\app.exe",
+			str(wine_app.get("Exec", "")))
+
+
+## Exec values must reach OS.create_process as a real argument vector: the
+## executable alone in element 0, arguments split off, and field codes gone.
+func _check_exec_parsing() -> void:
+	_report.section("exec parsing")
+	_check_exec("firefox", ["firefox"])
+	_check_exec("/usr/bin/gnome-terminal --window", ["/usr/bin/gnome-terminal", "--window"])
+	_check_exec("   spaced   out  ", ["spaced", "out"])
+	_check_exec("env FOO=1 /bin/app", ["env", "FOO=1", "/bin/app"])
+
+	# Field codes expand to nothing without a document to open, and must not
+	# survive as empty arguments.
+	_check_exec("firefox %U", ["firefox"])
+	_check_exec("app %f %F %u %U %d %D %n %N %v %m %k", ["app"])
+	_check_exec("app --tab %U --new", ["app", "--tab", "--new"])
+
+	# Quoting groups an argument; %% is a literal percent.
+	_check_exec('sh -c "echo hi there"', ["sh", "-c", "echo hi there"])
+	_check_exec('app "/opt/My Apps/run.sh"', ["app", "/opt/My Apps/run.sh"])
+	_check_exec("app\tone\ttwo", ["app", "one", "two"])
+	_check_exec('app foo"bar baz"qux', ["app", "foobar bazqux"])
+	# An argument the author wrote as "" survives as an empty argument, where a
+	# field code that expanded to nothing would have been dropped.
+	_check_exec('app "" x', ["app", "", "x"])
+	_check_exec("app 100%%", ["app", "100%"])
+
+	# All four escapes the spec allows inside a quoted argument.
+	_check_exec('app "a \\"quoted\\" b"', ["app", 'a "quoted" b'])
+	_check_exec('app "a\\\\b"', ["app", "a\\b"])
+	_check_exec('app "a\\`b"', ["app", "a`b"])
+	_check_exec('app "a\\$b"', ["app", "a$b"])
+	# A backslash before anything else is literal. Wine-generated entries lean on
+	# this, and it is what keeps them intact once the value is unescaped upstream.
+	_check_exec('app "C:\\Program\\app.exe"', ["app", "C:\\Program\\app.exe"])
+
+	# Reserved characters are carried through untouched: the argv goes straight to
+	# create_process, so nothing downstream gives them shell meaning.
+	_check_exec("app a;b|c&d", ["app", "a;b|c&d"])
+
+	# %i expands to two arguments, %c to the display name; both only when the
+	# caller supplies the value.
+	_check_exec("app %i", ["app", "--icon", "test-icon"], "Test App", "test-icon")
+	_check_exec("app %i", ["app"], "Test App", "")
+	_check_exec("app %c", ["app", "Test App"], "Test App", "")
+
+	# %f and %u are single-valued, so the spec does allow them inside a larger
+	# argument; with no document they leave the rest of the argument standing.
+	_check_exec("app --file=%f", ["app", "--file="])
+	_check_exec("app %k", ["app"])
+	_check_exec("app 100%", ["app", "100%"])
+	_check_exec("app %%F", ["app", "%F"])
+	# The spec calls expansion inside a quoted argument undefined rather than
+	# invalid, so expanding is one of the conformant choices; pinned here.
+	_check_exec('app "%U"', ["app"])
+
+	_report.check("empty Exec yields no argv", FileUtils.parse_exec("").is_empty())
+	_report.check("field-code-only Exec yields no argv", FileUtils.parse_exec("%U").is_empty())
+
+	_check_rejected("unknown field code", "app %x")
+	_check_rejected("%F inside a larger argument", "app --files=%F")
+	_check_rejected("%U inside a larger argument", "app --urls=%U")
+	_check_rejected("%i inside a larger argument", "app --icon=%i")
+	_check_rejected("unclosed quote", 'app "unterminated')
+	_check_rejected("unclosed quote around a path", 'app "/opt/My Apps/run.sh')
+
+
+## A malformed Exec must yield no argv at all: the spec leaves such a command
+## line unprocessed rather than launched with the bad argument patched over.
+func _check_rejected(label: String, exec_value: String) -> void:
+	var got := FileUtils.parse_exec(exec_value, "Test App", "test-icon")
+	_report.check("%s rejects Exec=%s" % [label, exec_value], got.is_empty(), str(got))
+
+
+func _check_exec(exec_value: String, expected: Array, display_name: String = "",
+		icon_name: String = "") -> void:
+	var got := FileUtils.parse_exec(exec_value, display_name, icon_name)
+	var want := PackedStringArray(expected)
+	_report.check("Exec=%s -> %s" % [exec_value, want], got == want, str(got))
+
+
+## The scan root must follow SHARE_DIR_ENV, for .desktop files and icons alike.
+func _check_share_dir_override() -> void:
+	_report.section("share dir override")
+	var share_root := _fixture_dir + "_share"
+	_remove_tree(share_root)
+	DirAccess.make_dir_recursive_absolute(share_root + "/applications")
+	DirAccess.make_dir_recursive_absolute(share_root + "/icons/hicolor/48x48/apps")
+	DirAccess.make_dir_recursive_absolute(share_root + "/pixmaps")
+
+	OS.unset_environment(FileUtils.SHARE_DIR_ENV)
+	_report.check("defaults to the board's path",
+			FileUtils.applications_dir() == "/usr/share/applications",
+			FileUtils.applications_dir())
+
+	OS.set_environment(FileUtils.SHARE_DIR_ENV, share_root)
+	_report.check("the override redirects the scan",
+			FileUtils.applications_dir() == share_root + "/applications",
+			FileUtils.applications_dir())
+
+	# Comparing strings alone would pass against a root nothing can be read from,
+	# which is the one outcome the override exists to avoid.
+	var entry := share_root + "/applications/probe.desktop"
+	var file := FileAccess.open(entry, FileAccess.WRITE)
+	file.store_string("[Desktop Entry]\nName=Probe\nExec=/bin/true\nIcon=probe\n")
+	file.close()
+	var found: Array = FileUtils.get_all_file_paths(FileUtils.applications_dir())
+	_report.check("the override's .desktop files are walked", found == [entry], str(found))
+
+	_write_png(share_root + "/icons/hicolor/48x48/apps/themed.png")
+	_write_png(share_root + "/pixmaps/pixmapped.png")
+	_report.check("themed icons resolve under the override",
+			IconTheme.load_icon("themed") != null)
+	_report.check("pixmaps resolve under the override",
+			IconTheme.load_icon("pixmapped") != null)
+	_report.check("an icon that is not there is still null",
+			IconTheme.load_icon("absent") == null)
+
+	OS.set_environment(FileUtils.SHARE_DIR_ENV, share_root + "//")
+	_report.check("a trailing slash is trimmed",
+			FileUtils.applications_dir() == share_root + "/applications",
+			FileUtils.applications_dir())
+
+	OS.unset_environment(FileUtils.SHARE_DIR_ENV)
+	_remove_tree(share_root)
+
+
+func _write_png(path: String) -> void:
+	var image := Image.create_empty(4, 4, false, Image.FORMAT_RGBA8)
+	image.fill(Color.RED)
+	image.save_png(path)
+
+
+## Deletes `path` and everything under it, at any depth.
+func _remove_tree(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	for sub in dir.get_directories():
+		_remove_tree(path + "/" + sub)
+	for f in dir.get_files():
+		DirAccess.remove_absolute(path + "/" + f)
+	DirAccess.remove_absolute(path)
+
+
+func _write_fixture(relative_path: String, lines: Array) -> String:
+	var path := _fixture_dir + "/" + relative_path
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		_report.check("could not write fixture " + path, false)
+		return path
+	file.store_string("\n".join(lines) + "\n")
+	file.close()
+	return path
+
+
+func _teardown() -> void:
+	var dir := DirAccess.open(_fixture_dir)
+	if dir == null:
+		return
+	for sub in dir.get_directories():
+		var nested := DirAccess.open(_fixture_dir + "/" + sub)
+		for f in nested.get_files():
+			DirAccess.remove_absolute(_fixture_dir + "/" + sub + "/" + f)
+		DirAccess.remove_absolute(_fixture_dir + "/" + sub)
+	for f in dir.get_files():
+		DirAccess.remove_absolute(_fixture_dir + "/" + f)
+	DirAccess.remove_absolute(_fixture_dir)
+

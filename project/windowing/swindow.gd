@@ -165,10 +165,21 @@ func focus() -> void:
 	on_focused.emit(self)
 
 
-## Sets whether input events will be directed to this window
+## Sets whether input events will be directed to this window, and tells the
+## content scene, if it defines on_window_focus_changed(bool), that focus moved.
 func set_input_enabled(enabled: bool) -> void:
 	content_3d.input_keyboard = enabled
 	content_3d.input_gamepad = enabled
+	# The header is gated for keys too, or every window's title bar would keep
+	# taking physical ones no matter which window is being typed into. Its
+	# gamepad flag is left as authored, which is off.
+	header_3d.input_keyboard = enabled
+
+	# The scene is set after the first focus call, so early on there is nothing
+	# to notify yet -- content_3d reports null until then.
+	var scene := content_3d.get_scene_instance()
+	if scene and scene.has_method("on_window_focus_changed"):
+		scene.on_window_focus_changed(enabled)
 
 ## Places the window at the depth its z_order calls for, leaving XY untouched.
 func apply_z_order() -> void:
@@ -208,7 +219,6 @@ func start_drag(event: XRToolsPointerEvent) -> void:
 	_drag_offset.z = 0.0
 	_drag_target = global_position
 	set_process(true)
-	print("[%s] drag start z=%.5f" % [name, global_position.z])
 
 ## Retargets the in-flight drag to `hit_world`, clamped to world bounds. No-op
 ## when no drag is in flight.
@@ -237,7 +247,6 @@ func stop_drag() -> void:
 	_dragging = false
 	# The other gesture may still need the tick
 	set_process(_resizing)
-	print("[%s] drag end z=%.5f" % [name, global_position.z])
 
 ## `pos` clamped into world_bounds on X and Y; Z is passed through untouched.
 func _clamp_to_bounds(pos: Vector3) -> Vector3:
@@ -262,7 +271,6 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	_resize_start_size = content_size
 	_resize_start_pos  = global_position
 	set_process(true)
-	print("[%s] resize start z=%.5f" % [name, global_position.z])
 
 
 ## Resizes the window to follow the pointer at `hit_world`, keeping the edges
@@ -323,7 +331,12 @@ func stop_resize() -> void:
 	set_process(_dragging)
 	# Gesture over: settle exactly, whatever the throttle last committed
 	_apply_size(content_size)
-	print("[%s] resize stops z=%.5f" % [name, global_position.z])
+
+
+## Resizes the window's content to `size`, clamped to MIN/MAX_CONTENT_SIZE.
+## For a one-off resize outside of a pointer drag, e.g. at creation.
+func resize(size: Vector2) -> void:
+	_apply_size(size)
 
 
 ## Resizes the window's content to `new_size`, clamped to MIN/MAX_CONTENT_SIZE,

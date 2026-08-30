@@ -44,11 +44,12 @@ func create_keyboard() -> void:
 
 ## Invoked on (virtual) keyboard input
 func _on_key_pressed(event: InputEventKey) -> void:
-	if not XRUtils.is_openxr_active():  # In editor, only map virtual keyboard input to windows
-		if not _focused:
-			return
-		print(_focused)
-		_focused.send_input(event)
+	# The only route virtual keys take. The keyboard emits this signal rather than
+	# injecting into the Input singleton, so nothing else in the tree ever sees
+	# them -- typing cannot drive the simulator's WASD locomotion.
+	if not _focused:
+		return
+	_focused.send_input(event)
 
 
 ## Closes `win`. Ignored when it is not in the stack.
@@ -124,7 +125,6 @@ func _recalculate_z_order() -> void:
 
 ## Drops a closed window from the stack and promotes the next frontmost one.
 func _on_window_closed(win: Node3D) -> void:
-	print("removed from window list")
 	windows_list.erase(win)
 	if win == _focused:
 		_focused = null
@@ -152,7 +152,11 @@ func _on_window_focused(win: SWindow) -> void:
 
 func _ready() -> void:
 	# TEMP: hardcoded startup windows, pending a real session/launcher flow
-	var win1: SWindow = create_window(Vector3(-0.3, 1.5, -2.0))
+	# Browse-friendly size for the application list.
+	create_window(Vector3(-0.3, 1.5, -2.0),
+			load("res://project/launch_service/application_menu.tscn")).resize(Vector2(2.4, 1.4))
+	# TODO: Make terminal_ui's fixed-size children fill the viewport and let its
+	# output expand vertically before choosing a new terminal startup size.
 	create_window(Vector3(0.3, 1.5, -2.0), load("res://project/shell/terminal_ui.tscn"))
 	
 	create_keyboard()
