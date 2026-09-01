@@ -76,6 +76,13 @@ private:
 	 * the point of measuring the frame.
 	 */
 	PackedFloat64Array convert_samples;
+
+	/*
+	 * Last size a map or resize event reported. Deliberately survives unmap
+	 * and stop(), because get_stats() is read during teardown. Callers who
+	 * want the size right now want get_surface_size().
+	 */
+	Vector2i last_mapped_size;
 	int64_t frames_copied = 0;
 	int64_t frames_rejected = 0;
 	int64_t slow_frames = 0;

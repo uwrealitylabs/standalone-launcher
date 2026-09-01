@@ -184,12 +184,12 @@ void WaylandCompositor::drain_events()
 	while (wlb_next_event(server, &ev)) {
 		switch (ev.type) {
 		case WLB_EVENT_MAPPED:
-			emit_signal("surface_mapped",
-					Vector2i((int32_t)ev.width, (int32_t)ev.height));
+			last_mapped_size = Vector2i((int32_t)ev.width, (int32_t)ev.height);
+			emit_signal("surface_mapped", last_mapped_size);
 			break;
 		case WLB_EVENT_RESIZED:
-			emit_signal("surface_resized",
-					Vector2i((int32_t)ev.width, (int32_t)ev.height));
+			last_mapped_size = Vector2i((int32_t)ev.width, (int32_t)ev.height);
+			emit_signal("surface_resized", last_mapped_size);
 			break;
 		case WLB_EVENT_UNMAPPED:
 			emit_signal("surface_unmapped");
@@ -320,7 +320,13 @@ Dictionary WaylandCompositor::get_stats() const
 	out["frames_copied"] = frames_copied;
 	out["frames_rejected"] = frames_rejected;
 	out["slow_frames"] = slow_frames;
-	out["surface_size"] = get_surface_size();
+	/*
+	 * The cached size rather than get_surface_size(): Godot exits children
+	 * before parents, so by the time an owner prints stats from its own
+	 * _exit_tree, this node's _exit_tree has already nulled the server that a
+	 * live query reads through, and the answer would always be (0, 0).
+	 */
+	out["surface_size"] = last_mapped_size;
 
 	for (int64_t i = 0; i < convert_samples.size(); i++) {
 		sorted.push_back(convert_samples[i]);
