@@ -1,0 +1,18 @@
+[configuration]
+
+entry_symbol = "wayland_compositor_init"
+compatibility_minimum = "4.5"
+
+; Linux arm64 only, deliberately. wlroots exists on no other platform, and the
+; VM and the target board are both arm64 -- advertising an x86_64 entry that
+; nothing builds would be a claim the descriptor cannot honour. Elsewhere Godot
+; logs that it found no matching library and the classes stay unregistered,
+; which is not fatal: callers must guard on ClassDB.class_exists().
+;
+; The debug/release feature tag is required. Without it nothing selects between
+; the two template targets in the filenames below.
+
+[libraries]
+
+linux.debug.arm64 = "res://project/compositor/bin/libwl_compositor.linux.template_debug.arm64.so"
+linux.release.arm64 = "res://project/compositor/bin/libwl_compositor.linux.template_release.arm64.so"

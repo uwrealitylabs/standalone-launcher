@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3 uid="uid://bwlcompositorpoc1"]
+
+[ext_resource type="Script" path="res://project/compositor/compositor_poc.gd" id="1_poc"]
+
+[sub_resource type="QuadMesh" id="QuadMesh_screen"]
+size = Vector2(0.6, 0.6)
+
+[node name="CompositorPoc" type="Node3D"]
+script = ExtResource("1_poc")
+
+[node name="Screen" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, -1)
+mesh = SubResource("QuadMesh_screen")
