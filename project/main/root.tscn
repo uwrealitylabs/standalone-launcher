@@ -1,4 +1,4 @@
-[gd_scene load_steps=23 format=3 uid="uid://bx5my3gah4snb"]
+[gd_scene load_steps=24 format=3 uid="uid://bx5my3gah4snb"]
 
 [ext_resource type="Script" uid="uid://bqlkgtmwn4qfr" path="res://project/main/root.gd" id="1_jbgo8"]
 [ext_resource type="PackedScene" uid="uid://d1cjyqd3nylps" path="res://project/xr/xr_player.tscn" id="2_ticcp"]
@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" uid="uid://c2vufctclqcr3" path="res://project/main/environment.tscn" id="4_5l8kh"]
 [ext_resource type="PackedScene" uid="uid://cqhw276realc" path="res://addons/godot-xr-tools/functions/function_pointer.tscn" id="4_41lny"]
 [ext_resource type="PackedScene" uid="uid://c6s5me84muhcj" path="res://project/windowing/window_manager.tscn" id="8_41lny"]
+[ext_resource type="PackedScene" uid="uid://mqg1bth77obk" path="res://project/compositor/compositor_screen.tscn" id="9_cmpsc"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_l8v81"]
 sky_top_color = Color(0.7164733, 0.6269366, 0.43380052, 1)
@@ -145,6 +146,9 @@ update_rotation = false
 update_scale = false
 
 [node name="WindowManager" parent="." instance=ExtResource("8_41lny")]
+
+[node name="CompositorScreen" parent="WindowManager" instance=ExtResource("9_cmpsc")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.6, 1.5, -2)
 
 [editable path="XROrigin3D"]
 [editable path="XROrigin3D/XRController3D_left/LeftHand"]
