@@ -3,7 +3,7 @@
 - **Status:** Provisional go
 - **Follow-up:** `[Compositor 1] Display one Wayland application in Godot`
 - **Target:** Godot 4.5, OpenXR, arm64 Linux on the RB 5
-- **Last updated:** 2026-08-31
+- **Last updated:** 2026-09-02
 
 ## Decision summary
 
@@ -21,24 +21,24 @@ The first proof of concept will:
 - display that texture on a fixed `MeshInstance3D` quad in the XR scene; and
 - use `weston-simple-shm` as the first client.
 
-Card 1 (Display one Wayland application in Godot) will not implement input, resizing, popups, multiple windows, XWayland,
-GPU-buffer sharing, or integration with the launcher's existing `SWindow`
-class. These are separate risks and do not need to be solved to prove the
-surface-to-XR path.
+This first proof of concept will not implement input, resizing, popups,
+multiple windows, XWayland, GPU-buffer sharing, or integration with the
+launcher's existing `SWindow` class. These are separate risks and do not need
+to be solved to prove the surface-to-XR path.
 
 ## Why wlroots
 
 wlroots supplies the Wayland protocol and surface lifecycle machinery that this
 project needs without requiring a complete desktop environment. `tinywl` is a
 useful reference for protocol setup, but it should not be copied and reduced:
-Card 1 needs only a display socket, shared-memory buffers, XDG shell surfaces,
-and non-blocking event dispatch.
+this proof of concept needs only a display socket, shared-memory buffers, XDG
+shell surfaces, and non-blocking event dispatch.
 
 The selected wlroots version supports creating `wl_shm` without a renderer and
 allows a compositor with no renderer. That matches this design because Godot,
 not wlroots, performs the final rendering. If the pinned build unexpectedly
 requires a renderer on the target, use the Pixman software renderer as a
-fallback; do not add a second GLES or Vulkan context to Card 1.
+fallback; do not add a second GLES or Vulkan context to the proof of concept.
 
 Other options add work without reducing the main risk. Smithay adds a Rust/C++
 boundary, capturing a nested compositor's whole output loses per-window surface
@@ -60,21 +60,25 @@ Wayland client
 The compositor and buffer copy run on Godot's main thread. Each Godot frame
 polls the Wayland event loop with a zero timeout and flushes clients; it must
 never wait for a Wayland event. wlroots documents shared-memory access as not
-thread-safe, so moving this work to a worker thread is out of scope for Card 1.
+thread-safe, so moving this work to a worker thread is out of scope for this
+proof of concept.
 
 When a surface commits a buffer, the bridge must:
 
 1. lock the buffer for the duration of the read;
 2. begin read access and use the returned width, height, pixel format, and
    **stride** (the byte distance between rows);
-3. initially accept only `XRGB8888` and `ARGB8888`, scale 1, and normal
-   transform;
+3. advertise both `XRGB8888` and `ARGB8888` on `wl_shm` — the protocol
+   mandates both, and `wlr_shm_create` asserts on a list missing either — but
+   accept only `XRGB8888` frames, at scale 1 and normal transform, rejecting
+   `ARGB8888` at acquire time because it is premultiplied;
 4. convert the little-endian BGR byte layout to Godot's RGBA8 layout;
 5. update one long-lived `ImageTexture`, recreating it only if dimensions
    change;
 6. end access and unlock the buffer; and
-7. complete the client's frame callback at most once per Godot frame, after the
-   copy has been accepted.
+7. complete the client's frame callback at most once per Godot frame, whether
+   or not the frame was accepted — a client that stops receiving `frame_done`
+   stops drawing.
 
 Unsupported formats, transforms, scales, or roles must produce a clear log
 message instead of an incorrectly rendered image. The server must also send the
@@ -83,10 +87,10 @@ acknowledges this event before attaching its first buffer.
 
 ## Copy first; GPU sharing later
 
-Card 1 deliberately uses a CPU copy. `wl_shm` is the smallest path that tests
-the important integration points: wlroots inside Godot, two event loops, buffer
-lifetime, texture upload, and XR frame cost. It also works without modifying
-Godot or creating another GPU rendering context.
+This proof of concept deliberately uses a CPU copy. `wl_shm` is the smallest
+path that tests the important integration points: wlroots inside Godot, two
+event loops, buffer lifetime, texture upload, and XR frame cost. It also works
+without modifying Godot or creating another GPU rendering context.
 
 Direct DMA-BUF sharing is deferred. A production-quality zero-copy path would
 need all of the following to work together:
@@ -99,12 +103,13 @@ need all of the following to work together:
 
 Stock Godot 4.5 does not provide a settled GDExtension path for requesting the
 needed Vulkan device extensions at device creation. Zero-copy is therefore an
-optimization spike after the copy path works, not a prerequisite for Card 1.
+optimization spike after the copy path works, not a prerequisite for the proof
+of concept.
 
 ## Input path for the following card
 
-Input is not implemented in Card 1, but the boundary is defined now so the
-display proof does not create a dead end.
+Input is not implemented in this proof of concept, but the boundary is defined
+now so the display proof does not create a dead end.
 
 For pointer input, Godot will map the controller or mouse ray hit into surface
 pixel coordinates. The Wayland adapter will resolve the leaf surface at that
@@ -155,7 +160,7 @@ later tests because they are likely to make DMA-BUF support important.
 No known issue makes the approach unsuitable today, but the decision remains
 provisional until it runs on the target device.
 
-| Risk | Card 1 response |
+| Risk | Response |
 |---|---|
 | wlroots API and listener complexity | Isolate it in the pure-C bridge and pin the source version. |
 | Wayland work stalls the XR frame | Use zero-timeout polling on the main thread and record frame timing. |
@@ -164,15 +169,15 @@ provisional until it runs on the target device.
 | Native dependencies do not deploy on arm64 | Prove the target build before implementing the full buffer path. |
 | Existing `SWindow` assumes a `SubViewport` | Use a dedicated quad now; introduce a content-surface adapter in a separate follow-up. |
 
-Proceed if Card 1 renders the animated client correctly on both the development
-host and RB 5, starts and shuts down repeatedly without leaks or stale
-sockets, and does not cause material XR frame misses. A pass proves the plumbing,
-not multi-window scalability: the tiny test surface is only an early performance
-signal. Reconsider the architecture if the native extension cannot be deployed
-reproducibly, non-blocking dispatch still causes repeated XR stalls, or a
-representative-size copied surface cannot meet the launcher's frame budget.
+Proceed if the proof of concept renders the animated client correctly on both
+the development host and RB 5, starts and shuts down repeatedly without leaks or
+stale sockets, and does not cause material XR frame misses. A pass proves the
+plumbing, not multi-window scalability: the tiny test surface is only an early
+performance signal. Reconsider the architecture if the native extension cannot
+be deployed reproducibly, non-blocking dispatch still causes repeated XR stalls,
+or a representative-size copied surface cannot meet the launcher's frame budget.
 
-## Card 1 implementation order and definition of done
+## Implementation order and definition of done
 
 1. Build a Godot GDExtension skeleton plus the C bridge for the host and arm64.
 2. Start the private socket and advertise the three required Wayland globals.
@@ -182,7 +187,7 @@ representative-size copied surface cannot meet the launcher's frame budget.
 5. Display that texture on a fixed XR quad and send frame-done callbacks.
 6. Instrument copy/upload time, missed XR frames, startup, and shutdown.
 
-Card 1 is complete when:
+The proof of concept is complete when:
 
 - the same pinned native source builds for the host and RB 5;
 - the client animation has correct colors and geometry, with no frozen first

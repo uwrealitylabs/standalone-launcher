@@ -1,7 +1,7 @@
 /*
  * wl_bridge -- the only place wlroots types are allowed to exist.
  *
- * Card 1 scope: one Wayland server, one xdg_toplevel, wl_shm buffers copied to
+ * Scope: one Wayland server, one xdg_toplevel, wl_shm buffers copied to
  * the caller. No input, no resize negotiation, no popups, no subsurfaces.
  *
  * The API deliberately carries state and events rather than only frames: the

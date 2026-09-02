@@ -14,8 +14,8 @@ using namespace godot;
 
 /*
  * wlb_set_log takes a bare function pointer with no user data, so the sink has
- * to be file-static. Card 1 runs one compositor, so there is nothing to
- * disambiguate.
+ * to be file-static. This proof of concept runs one compositor, so there is
+ * nothing to disambiguate.
  */
 static void bridge_log_sink(const char *msg)
 {

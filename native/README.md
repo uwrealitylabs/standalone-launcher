@@ -1,6 +1,6 @@
 # Wayland compositor GDExtension
 
-Native half of Card 1, *Display one Wayland application in Godot*. Runs a
+Native half of *Display one Wayland application in Godot*. Runs a
 minimal Wayland server inside the launcher, copies one client's shared-memory
 pixels into a Godot `ImageTexture`, and hands that texture to
 `project/compositor/compositor_poc.gd`.
@@ -117,7 +117,7 @@ enough to copy. Reading `current.buffer` later gets NULL.
 
 **`wl_shm` must advertise both ARGB8888 and XRGB8888.** The protocol mandates
 both, and `wlr_shm_create` asserts on a list missing either — advertising XRGB
-alone is not an option. Card 1 therefore accepts both onto the wire and rejects
+alone is not an option. The bridge therefore accepts both onto the wire and rejects
 ARGB frames at acquire time with a rate-limited log, because Wayland ARGB is
 premultiplied and `StandardMaterial3D` does not expect that.
 

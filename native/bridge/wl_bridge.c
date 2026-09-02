@@ -42,7 +42,7 @@ struct wlb_server {
 	struct wlr_xdg_shell *xdg_shell;
 
 	/*
-	 * Card 1 tracks exactly one toplevel. Later toplevels are closed rather
+	 * The bridge tracks exactly one toplevel. Later toplevels are closed rather
 	 * than ignored: a surface cannot map without a conforming initial
 	 * configure, so ignoring one would leave that client waiting forever.
 	 */
@@ -290,7 +290,7 @@ static void handle_new_toplevel(struct wl_listener *listener, void *data)
 	struct wlr_xdg_toplevel *toplevel = data;
 
 	if (server->toplevel != NULL) {
-		bridge_log("rejecting extra toplevel: Card 1 shows one window");
+		bridge_log("rejecting extra toplevel: compositor shows one window");
 		wlr_xdg_toplevel_send_close(toplevel);
 		return;
 	}
@@ -542,7 +542,7 @@ int wlb_frame_acquire(wlb_server *server, wlb_frame *out)
 
 	/*
 	 * Wayland ARGB8888 is premultiplied, which StandardMaterial3D does not
-	 * expect, so Card 1 renders XRGB only. Rejecting here rather than rendering
+	 * expect, so the bridge renders XRGB only. Rejecting here rather than rendering
 	 * something subtly wrong; the log is rate-limited because a client that
 	 * picks ARGB picks it every frame.
 	 */

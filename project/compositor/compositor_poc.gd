@@ -1,6 +1,6 @@
 extends MeshInstance3D
 
-## Card 1 proof: shows one Wayland client on a fixed quad.
+## Proof of concept: shows one Wayland client on a fixed quad.
 ##
 ## Owns the client process outright — creation, liveness, and teardown — while
 ## [WaylandCompositor] owns polling and the texture. Splitting process ownership

@@ -87,7 +87,7 @@ if [ ${#missing[@]} -gt 0 ]; then
         libseat-dev hwdata"
 fi
 
-# weston-simple-shm is the Card 1 test client. Checked here rather than
+# weston-simple-shm is the proof-of-concept test client. Checked here rather than
 # discovered missing at demo time, when it reads as a compositor failure.
 if ! command -v weston-simple-shm >/dev/null 2>&1; then
 	warn "weston-simple-shm not on PATH; install it before running the demo"
