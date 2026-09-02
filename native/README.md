@@ -131,75 +131,33 @@ was accepted or rejected.
 ## In the launcher
 
 `project/compositor/compositor_screen.tscn` is the reusable half: a
-`MeshInstance3D` called `CompositorScreen` carrying `compositor_poc.gd` and a
-0.6 m quad. It is instanced twice.
+`MeshInstance3D` carrying `compositor_poc.gd` and a 0.6 m quad, instanced twice.
 
-| Scene | Node | At | For |
-|---|---|---|---|
-| `project/main/root.tscn` | `WindowManager/CompositorScreen` | `(1.6, 1.5, -2.0)` | the launcher itself |
-| `project/compositor/compositor_poc.tscn` | `Screen` | `(0, 1.2, -1)` | the `tests/linux/` harnesses |
+| Scene | Node | At |
+|---|---|---|
+| `project/main/root.tscn` | `WindowManager/CompositorScreen` | `(1.6, 1.5, -2.0)` |
+| `project/compositor/compositor_poc.tscn` | `Screen` | `(0, 1.2, -1)` |
 
-The launcher position puts the quad to the right of the startup windows. The
-terminal spans x = -0.45 to 1.05 and the application menu -1.5 to 0.9;
-`weston-simple-shm`'s square surface makes a 0.6 m quad spanning 1.3 to 1.9, so
-there is 0.25 m of clearance. That is a fact about this client, not a guarantee:
-`_apply_aspect` widens the quad with the surface, and anything wider than about
-1.8:1 would reach back over the terminal.
+A fixed quad and nothing more, deliberately not an `SWindow`: no input, focus,
+resizing, z-ordering or second surface. Its `mesh` is `resource_local_to_scene`,
+so the runtime re-aspect in one instance cannot resize the other's.
 
-The quad's `mesh` is `resource_local_to_scene`, so the runtime re-aspect in one
-instance cannot resize the other's.
+The launcher position clears the startup windows, which span x = -1.5 to 1.05;
+`weston-simple-shm`'s square surface makes a quad spanning 1.3 to 1.9. That is a
+fact about this client, not a guarantee — `_apply_aspect` widens the quad with
+the surface, and anything past about 1.8:1 would reach back over the terminal.
 
-This is a fixed quad and nothing more. It is deliberately not an `SWindow`:
-no input, no focus, no resizing, no z-ordering, no second surface.
+Two independent rules keep it invisible where it cannot work: `visible = false`
+is serialized into the scene rather than applied in `_ready`, and `visible`
+becomes true only once `get_texture()` has returned a texture *and* it has been
+bound. `ClassDB.class_exists("WaylandCompositor")` is the only gate — where the
+class is absent `_ready` prints one line and returns, having already called
+`set_process(false)`. That is an expected host, not a misconfigured one.
 
-### Staying invisible
-
-Two independent rules, because a white rectangle floating beside the terminal on
-every developer's machine is the failure worth designing against.
-
-1. `visible = false` is **serialized into the scene**, not applied in `_ready`.
-   A screen whose script returns early — or never runs at all — is still hidden.
-2. `visible = true` happens only after `get_texture()` has returned a non-null
-   texture *and* it has been bound to the material. There is no placeholder
-   texture, so the quad is never shown holding nothing. `surface_unmapped` and
-   `client_gone` hide it again.
-
-### What runs where
-
-`ClassDB.class_exists("WaylandCompositor")` is the only gate. Where the class is
-absent — every macOS and x86_64 machine, since the descriptor declares Linux
-arm64 and nothing else — `_ready` prints one line and returns: no compositor
-node, no server, no client process, no material, and the `set_process(false)` it
-opens with left standing, so the screen does not even receive per-frame
-callbacks. This is an expected host, not a misconfigured one, and it is not
-reported as a warning.
-
-Where the class is present the server starts and `weston-simple-shm` is
-launched. The two are not separately switchable: a host that can run the server
-is a host that can run the client.
-
-The screen's `_process` runs only while it owns a live client pid — enabled once
-`OS.create_process` returns one, disabled again when the child is reaped or the
-spawn failed. The `WaylandCompositor` child keeps its own processing throughout,
-because the server has to keep polling regardless.
-
-### Backing the integration out
-
-Removing the launcher instance is three edits to `project/main/root.tscn`:
-
-1. delete the `[node name="CompositorScreen" parent="WindowManager" ...]` block,
-2. delete the `compositor_screen.tscn` `ext_resource` line,
-3. decrement `load_steps`.
-
-That unhooks the compositor from the launcher and nothing else — the scene, the
-script, the harness wrapper and the tests all stay, and `tests/linux/` keeps
-working. `tests/compositor_scene_check.gd` will then fail its root-scene section
-until that section goes too.
-
-There is no environment variable for this. A flag would be read long after
-Godot has already loaded the GDExtension at project import, so it could not
-guard the thing it appeared to guard; removing the node is what actually
-prevents a server from ever starting.
+To back the integration out, delete the `CompositorScreen` node block and its
+`ext_resource` from `root.tscn` and decrement `load_steps`; the scene, script,
+harness wrapper and tests all stay. There is no environment variable for this —
+a flag would be read long after Godot has loaded the GDExtension at import.
 
 ## Testing
 
@@ -228,27 +186,19 @@ godot --headless --xr-mode off --path . \
     --script res://tests/compositor_extension_check.gd
 ```
 
-`tests/compositor_visibility_check.gd` covers the dormant path with the node
-actually in the tree: hidden before and after `_ready`, no compositor child, no
-material, and processing off. Where the class *is* registered it skips rather
-than starting a real server, which is a side effect a tracked suite should not
-have:
+`tests/compositor_visibility_check.gd` covers the dormant path with the node in
+the tree: hidden before and after `_ready`, no compositor child, no material,
+processing off. Where the class *is* registered it skips rather than starting a
+real server:
 
 ```bash
 godot --headless --xr-mode off --path . \
     --script res://tests/compositor_visibility_check.gd
 ```
 
-Between them, `compositor_scene_check.gd` and `compositor_visibility_check.gd`
-verify everything about the integration that can be verified with no extension
-built: that the scenes load and are authored the way they claim, that the
-launcher instances the screen at the right place under `WindowManager`, that the
-quad is hidden in the scene file rather than by code, and that a host without
-the extension creates no compositor, starts no process and shows nothing.
-
-What they cannot verify is the only thing left: that a real client's frames
-reach the quad and make it visible. That needs the extension, a display and a
-live server, and belongs to `tests/linux/poc_capture.gd`.
+Neither suite can show that a real client's frames reach the quad. That needs
+the extension, a display and a live server, and belongs to
+`tests/linux/poc_capture.gd`.
 
 Anything involving a live Wayland server needs Linux; those harnesses are
 local-only and are not part of the tracked suites.
