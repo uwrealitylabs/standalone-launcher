@@ -33,7 +33,7 @@ const SCREEN_SCENE := "res://project/compositor/compositor_screen.tscn"
 const POC_SCENE := "res://project/compositor/compositor_poc.tscn"
 const ROOT_SCENE := "res://project/main/root.tscn"
 const POC_SCRIPT := "res://project/compositor/compositor_poc.gd"
-const DESCRIPTOR := "res://project/compositor/wayland_compositor.gdextension"
+const DESCRIPTOR := "res://project/compositor/wayland_compositor.linux_arm64_only.gdextension"
 
 # The quad is authored square and re-aspected at runtime from the surface size.
 const AUTHORED_QUAD_SIZE := Vector2(0.6, 0.6)

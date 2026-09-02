@@ -16,7 +16,7 @@ extends SceneTree
 const Report := preload("res://tests/support/report.gd")
 
 const CLASS_NAME := "WaylandCompositor"
-const DESCRIPTOR := "res://project/compositor/wayland_compositor.gdextension"
+const DESCRIPTOR := "res://project/compositor/wayland_compositor.linux_arm64_only.gdextension"
 
 # Emitted by WaylandCompositor. Ordered as the lifecycle reaches them.
 const EXPECTED_SIGNALS := [
