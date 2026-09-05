@@ -9,7 +9,7 @@ extends RefCounted
 ##
 ## SWindow._resolve_pointer_hit projects a null pointer's position onto the
 ## frozen gesture plane rather than casting a ray, which is what lets a headless
-## test drive start_drag and start_resize with no controller in the scene.
+## test drive start_resize with no controller in the scene.
 static func event_at(type: int, target: Node3D, world_pos: Vector3) -> XRToolsPointerEvent:
 	return XRToolsPointerEvent.new(type, null, target, world_pos, world_pos)
 

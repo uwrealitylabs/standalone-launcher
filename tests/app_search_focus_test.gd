@@ -31,7 +31,7 @@ var _fixture_dir := ""
 
 ## The app menu's controller among the manager's windows, with its window.
 func _find_menu(wm: WindowManager) -> Array:
-	for win in wm.windows_list:
+	for win in wm.open_windows:
 		var inst = win.content_3d.get_scene_instance()
 		if inst and inst.has_method("populate_apps"):
 			return [win, inst]
@@ -159,7 +159,7 @@ func _initialize() -> void:
 			str(_rows(menu).size()))
 
 	var terminal_window: SWindow = null
-	for win in wm.windows_list:
+	for win in wm.open_windows:
 		if win != menu_window:
 			terminal_window = win
 	_report.check("a second window exists to compare against", terminal_window != null)
