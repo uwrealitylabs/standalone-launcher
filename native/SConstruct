@@ -1,0 +1,68 @@
+#!/usr/bin/env python
+"""
+Builds the Wayland compositor GDExtension.
+
+    native/setup.sh                       # once: fetch and build pinned deps
+    cd native && scons target=template_debug
+
+Output lands in project/compositor/bin/, where the .gdextension descriptor
+expects it. Linux arm64 only -- see native/README.md.
+"""
+
+import glob
+import os
+
+env = SConscript("godot-cpp/SConstruct")
+
+# wlroots' public headers refuse to compile without this: every one of them
+# starts with an #error telling you the API is unstable. Omitting it produces a
+# wall of errors that look like missing headers rather than a missing define.
+env.Append(CPPDEFINES=["WLR_USE_UNSTABLE"])
+
+prefix = os.path.abspath(".deps/prefix")
+
+# meson installs into a multiarch libdir on Debian derivatives
+# (lib/aarch64-linux-gnu) and into plain lib/ elsewhere, so all of these are
+# searched rather than guessed at.
+pkg_dirs = [
+	os.path.join(prefix, "lib", "pkgconfig"),
+	os.path.join(prefix, "lib64", "pkgconfig"),
+	os.path.join(prefix, "share", "pkgconfig"),
+]
+pkg_dirs += glob.glob(os.path.join(prefix, "lib", "*-linux-*", "pkgconfig"))
+pkg_path = os.pathsep.join(d for d in pkg_dirs if os.path.isdir(d))
+
+if not pkg_path:
+	raise SystemExit(
+		"No pkg-config data under native/.deps/prefix.\n"
+		"Run native/setup.sh first (Linux only)."
+	)
+
+pkg_config = "PKG_CONFIG_PATH={} pkg-config".format(pkg_path)
+
+# ParseConfig, not an append to LINKFLAGS: it sorts -l into LIBS and -L into
+# LIBPATH, which is what puts the archives *after* the object files on the link
+# line. LINKFLAGS lands before them, and a static archive listed before the
+# objects that need it contributes nothing -- the .so then builds cleanly and
+# fails to dlopen on undefined wlr_* symbols.
+#
+# --static because a plain --libs names only wlroots itself and leaves
+# libwayland-server and the rest of the closure undefined.
+env.ParseConfig("{} --cflags --libs --static wlroots-0.20 wayland-server"
+		.format(pkg_config))
+
+sources = Glob("src/*.cpp")
+
+# The bridge is C, not C++. Built as its own object list so the C++ flags
+# godot-cpp sets (-std=c++17 and friends) never reach it.
+c_env = env.Clone()
+c_env.Append(CFLAGS=["-std=c11"])
+c_objects = [c_env.SharedObject(f) for f in Glob("bridge/*.c")]
+
+lib_name = "libwl_compositor{}{}".format(env["suffix"], env["SHLIBSUFFIX"])
+library = env.SharedLibrary(
+	"../project/compositor/bin/" + lib_name,
+	source=sources + c_objects,
+)
+
+Default(library)

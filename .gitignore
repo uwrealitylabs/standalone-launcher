@@ -27,3 +27,8 @@ CLAUDE.md
 
 # macOS folder metadata
 .DS_Store
+
+# Native compositor extension: fetched dependencies and build output
+native/godot-cpp/
+native/.deps/
+project/compositor/bin/
