@@ -107,10 +107,11 @@ nodes; do not invent scene UIDs. Author the current keyboard pose on
 `KeyboardAnchor` (`position = (0, 0, -1)`, X rotation `-35°`) and instantiate the
 keyboard at identity beneath it.
 
-Store the keyboard instance on the manager. Hide it when there is no focused
-window, show it when focus exists, and continue routing key signals through the
-manager. Update tests that search only direct manager children to search beneath
-`KeyboardAnchor`.
+Keep the keyboard always visible and continue routing key signals through the
+manager. Hiding it on loss of focus would stop only its rendering: the collider
+stays in the physics space and the pointer ray still hits it, so keys could be
+pressed on an invisible board. Update tests that search only direct manager
+children to search beneath `KeyboardAnchor`.
 
 ### F2. Centralize size mutation
 
@@ -480,8 +481,9 @@ hand tracking, or rendering performance without board testing.
   and retains its public hover signals.
 - Affordances show on enter, stay shown during resize, hide on resize end, and
   become eligible to show again after exit/re-entry.
-- Keyboard visibility and key routing follow `focused_window`, including after
-  closing the focused window and after closing the last window.
+- Key routing follows `focused_window`, including after closing the focused
+  window and after closing the last window. The keyboard stays visible
+  throughout.
 
 ## 7. Device-only acceptance
 
