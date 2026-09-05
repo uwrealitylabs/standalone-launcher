@@ -139,10 +139,13 @@ func _check_pointer_event_drives_resize(win: SWindow) -> void:
 	_report.check("PRESSED on the R handle starts a resize", win._resizing)
 	_report.check("the started resize is the R handle", win._resize_handle == "R")
 
+	# Fixed-centre resize: the grabbed edge follows the pointer while the opposite
+	# edge moves by the same amount, so a 0.3 m displacement widens the window by
+	# 0.6 m.
 	_emit(right, XRToolsPointerEvent.Type.MOVED, grab + Vector3(0.3, 0, 0))
-	_report.check("MOVED on the R handle widens the window by 0.3 (got %.4f)"
+	_report.check("MOVED on the R handle widens the window by 0.6 (got %.4f)"
 			% (win.content_size.x - before.x),
-			absf(win.content_size.x - before.x - 0.3) < EPS)
+			absf(win.content_size.x - before.x - 0.6) < EPS)
 	_report.check("the R handle followed the new edge",
 			absf(right.position.x - win.content_size.x / 2.0) < EPS)
 
