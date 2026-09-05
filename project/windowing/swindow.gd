@@ -45,13 +45,14 @@ var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as ne
 # Resize window variables
 var _resizing          := false
 var _resize_handle     := ""
-# World-space grab point; deltas are measured in world space because the
-# window itself moves during L/B resizes — measuring in the live local frame
-# would feed the position shift back into the measurement (edge tracks only
-# 2/3 of pointer motion and oscillates)
+# The grab point and the window's frame are frozen at gesture start so a resize
+# is rotation-safe and fixed-centre: the origin never moves, both edges grow
+# symmetrically about it, and pointer displacement is projected onto the frozen
+# world axes rather than assuming world XY.
 var _resize_start_hit  := Vector3.ZERO
 var _resize_start_size := Vector2.ZERO
-var _resize_start_pos  := Vector3.ZERO
+var _resize_x_axis     := Vector3.RIGHT
+var _resize_y_axis     := Vector3.UP
 var _resize_plane      := Plane()
 
 # Grab bands straddling the content edges, keyed by handle id
@@ -202,10 +203,11 @@ func set_focused_visual(is_focused: bool) -> void:
 	else:
 		mat.albedo_color = Color(0.6, 0.6, 0.6, 1.0)
 
-## The window's facing plane at its current depth. Assumes the window is
-## XY-axis-aligned.
+## The window's facing plane at its current pose, using the live transformed
+## face normal so it is correct even when the window is rotated.
 func _get_plane() -> Plane:
-	return Plane(Vector3(0, 0, 1), global_position)
+	var xf := global_transform.orthonormalized()
+	return Plane(xf.basis.z, xf.origin)
 
 ## Starts a header drag from the grab described by `event`. No-op when the
 ## pointer ray misses the window's plane.
@@ -262,11 +264,14 @@ func _clamp_to_bounds(pos: Vector3) -> Vector3:
 ## Starts a resize on `handle` ("L", "R", "B", "BL" or "BR") from the grab
 ## described by `event`. No-op when the pointer ray misses the window's plane.
 func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
-	# Freeze the gesture plane after focusing (focus can raise the window by
-	# n*Z_STEP) and resolve the baseline against that same plane, so the
-	# baseline and later MOVED frames agree.
+	# Focus first, then freeze the whole gesture frame. The plane faces along the
+	# window normal and passes through the handle collider's depth centre (not the
+	# window origin), so the grab lands where the handle actually is. Resolving
+	# the baseline against this same frozen plane keeps it consistent with the
+	# MOVED frames that follow.
 	focus()
-	_resize_plane = _get_plane()
+	var xf := global_transform.orthonormalized()
+	_resize_plane = Plane(xf.basis.z, xf.origin + xf.basis.z * HANDLE_Z)
 	var hit = _resolve_pointer_hit(event, _resize_plane)
 	if hit == null:
 		return
@@ -274,59 +279,43 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	_resize_handle     = handle
 	_resize_start_hit  = hit
 	_resize_start_size = content_size
-	_resize_start_pos  = global_position
+	# Cache the world axes so displacement is measured in the window's own frame
+	# regardless of yaw. The origin is never cached: a resize never moves it.
+	_resize_x_axis     = xf.basis.x
+	_resize_y_axis     = xf.basis.y
 	set_process(true)
 
 
-## Resizes the window to follow the pointer at `hit_world`, keeping the edges
-## the grabbed handle does not own pinned. No-op when no resize is in flight.
+## Resizes the window to follow the pointer at `hit_world`, keeping the content
+## centre fixed and growing symmetrically. No-op when no resize is in flight.
 func update_resize(hit_world: Vector3) -> void:
 	if not _resizing:
 		return
-	# NOTE: Assumes window is unrotated (world XY == window XY)
-	var delta := Vector2(
-		hit_world.x - _resize_start_hit.x,
-		hit_world.y - _resize_start_hit.y
-	)
-	var new_size := _resize_start_size
-	# The screens are centred on the window, so a size change alone walks both
-	# edges outward by half of it. Every handle therefore also shifts the window
-	# by that same half, which is what pins the edge opposite the one grabbed.
-	# This sign maps that size change to the shift's direction: +1 on an axis
-	# whose positive edge the handle owns.
-	var shift_sign := Vector2.ZERO
+	# Project the displacement onto the frozen world axes, then apply the
+	# fixed-centre rule: the grabbed edge follows the pointer while the opposite
+	# edge moves by the same amount, so the dimension changes by twice the
+	# projected displacement. All requests go through resize() so the managed
+	# clamp cannot be bypassed.
+	var d := hit_world - _resize_start_hit
+	var dx := d.dot(_resize_x_axis)
+	var dy := d.dot(_resize_y_axis)
+	var dw := 0.0
+	var dh := 0.0
+	match _resize_handle:
+		"R":
+			dw = 2.0 * dx
+		"L":
+			dw = -2.0 * dx
+		"B":
+			dh = -2.0 * dy
+		"BR":
+			dw = 2.0 * dx
+			dh = -2.0 * dy
+		"BL":
+			dw = -2.0 * dx
+			dh = -2.0 * dy
 
-	if _resize_handle == "R":
-		new_size.x += delta.x
-		shift_sign.x = 1.0
-	elif _resize_handle == "L":
-		new_size.x -= delta.x
-		shift_sign.x = -1.0
-	elif _resize_handle == "B":
-		new_size.y -= delta.y
-		shift_sign.y = -1.0
-	elif _resize_handle == "BR":
-		new_size.x += delta.x
-		new_size.y -= delta.y
-		shift_sign = Vector2(1.0, -1.0)
-	elif _resize_handle == "BL":
-		new_size.x -= delta.x
-		new_size.y -= delta.y
-		shift_sign = Vector2(-1.0, -1.0)
-
-	var clamped := new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
-	# Measured against the size actually applied, not the pointer delta: past a
-	# clamp the pointer keeps moving while the size does not, and a shift still
-	# tracking the pointer would drag the pinned edge along with it.
-	var pos_shift := (clamped - _resize_start_size) * shift_sign / 2.0
-	# Apply the shift in XY only; z stays owned by z_order so a stale
-	# _resize_start_pos.z can't leak back in after a mid-resize stack change.
-	# NOTE: Assumes window is unrotated (basis maps XY shift to world XY).
-	var shifted := _resize_start_pos + \
-		global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
-	global_position.x = shifted.x
-	global_position.y = shifted.y
-	_apply_size(clamped, true)
+	resize(_resize_start_size + Vector2(dw, dh), true)
 
 
 ## Ends the resize and settles the render resolutions at the final size.

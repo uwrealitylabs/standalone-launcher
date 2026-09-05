@@ -64,8 +64,10 @@ func _initialize() -> void:
 	win.update_resize(origin + Vector3(0.4, 0, 0))
 	win._process(0.001)
 
+	# Fixed-centre resize doubles the pointer displacement: a 0.4 m grab pulls the
+	# grabbed edge out by 0.4 and the opposite edge out by 0.4, so 1.5 -> 2.3.
 	_report.section("mid-gesture, inside the commit interval")
-	_report.check("content grew to 1.9 wide", absf(win.content_size.x - 1.9) < EPS,
+	_report.check("content grew to 2.3 wide", absf(win.content_size.x - 2.3) < EPS,
 			str(win.content_size))
 	_check_screens_agree(win)
 	_report.check("gesture leaves the content redraw cadence alone",
@@ -111,7 +113,7 @@ func _initialize() -> void:
 	win._process(1.0)
 
 	_report.section("sub-tolerance nudge")
-	_report.check("0.5% growth does not earn a reallocation",
+	_report.check("a sub-tolerance nudge does not earn a reallocation",
 			win.content_3d.viewport_size.is_equal_approx(settled_res),
 			str(win.content_3d.viewport_size))
 	_report.check("a skipped commit does not re-arm the redraw",
@@ -158,25 +160,27 @@ func _initialize() -> void:
 	_report.near("content width clamped", win.content_size.x, SWindow.MAX_CONTENT_SIZE.x, EPS)
 	_check_invariant(win)
 
-	# --- each handle must pin the edges it does not own ---
-	# Re-seeded so every drag below stays clear of the clamps, which suppress the
-	# position shift and would pin both edges for the wrong reason. The five
-	# gestures grow the window cumulatively, ending at 2.7 x 1.35 against a
-	# MAX_CONTENT_SIZE of 3.0 x 2.5 -- adding another growing gesture here would
-	# run the width into the clamp.
-	win._apply_size(Vector2(1.5, 0.75))
-	await process_frame
+	# --- each handle keeps the centre fixed and changes only its dimensions ---
+	# Re-seeded before each gesture (inside the helper) so every drag stays clear
+	# of the clamps, which would cap the size change and hide a wrong delta.
+	_report.section("fixed centre, doubled deltas")
+	_check_fixed_centre(win, "R", Vector3(0.3, 0, 0), 0.6, 0.0)
+	_check_fixed_centre(win, "L", Vector3(-0.3, 0, 0), 0.6, 0.0)
+	_check_fixed_centre(win, "B", Vector3(0, -0.2, 0), 0.0, 0.4)
+	_check_fixed_centre(win, "BR", Vector3(0.3, -0.2, 0), 0.6, 0.4)
+	_check_fixed_centre(win, "BL", Vector3(-0.3, -0.2, 0), 0.6, 0.4)
+	_check_invariant(win)
 
-	_report.section("edge anchoring")
-	_check_anchors(win, "R", Vector3(0.3, 0, 0), ["left", "top", "bottom"], ["right"])
-	_check_anchors(win, "L", Vector3(-0.3, 0, 0), ["right", "top", "bottom"], ["left"])
-	_check_anchors(win, "B", Vector3(0, -0.2, 0), ["left", "right", "top"], ["bottom"])
-	_check_anchors(win, "BR", Vector3(0.3, -0.2, 0), ["left", "top"], ["right", "bottom"])
-	_check_anchors(win, "BL", Vector3(-0.3, -0.2, 0), ["right", "top"], ["left", "bottom"])
-	_report.check("the anchoring gestures stayed clear of the clamps",
-			win.content_size.x < SWindow.MAX_CONTENT_SIZE.x - EPS
-					and win.content_size.y < SWindow.MAX_CONTENT_SIZE.y - EPS,
-			str(win.content_size))
+	# --- the same local displacement resizes the same at any yaw ---
+	_report.section("rotation-safe")
+	var yaw_0 := _width_change_for_yaw(win, 0.0)
+	_report.near("yaw 0 doubles the 0.3 displacement", yaw_0, 0.6, EPS)
+	_report.near("yaw +theta matches yaw 0", _width_change_for_yaw(win, deg_to_rad(30)),
+			yaw_0, EPS)
+	_report.near("yaw -theta matches yaw 0", _width_change_for_yaw(win, deg_to_rad(-30)),
+			yaw_0, EPS)
+	win.rotation = Vector3.ZERO
+	win._apply_size(Vector2(1.5, 0.75))
 	_check_invariant(win)
 
 	_report.finish(self)
@@ -314,33 +318,42 @@ func _expected_res(size: Vector2, ppu: float) -> Vector2:
 
 
 ## Runs one whole resize gesture on `handle`, dragging the grab point by `move`,
-## then asserts the edges named in `pinned` sit exactly where they did before and
-## those in `moved` actually travelled.
-func _check_anchors(win: SWindow, handle: String, move: Vector3, pinned: Array,
-		moved: Array) -> void:
-	var before := _edges(win)
+## then asserts the content centre held still and each dimension changed by the
+## expected amount. Re-seeds to 1.5 x 0.75 first so the gesture stays clear of
+## the clamps, which would cap the delta and hide a wrong result.
+func _check_fixed_centre(win: SWindow, handle: String, move: Vector3,
+		expect_dw: float, expect_dh: float) -> void:
+	win.rotation = Vector3.ZERO
+	win._apply_size(Vector2(1.5, 0.75))
+	var centre_before: Vector3 = win.content_3d.global_position
+	var size_before: Vector2 = win.content_size
+
 	var origin: Vector3 = win.global_position
 	win.start_resize(handle, Fixtures.press_at(win, origin))
 	win.update_resize(origin + move)
 	win.stop_resize()
 
-	var after := _edges(win)
-	for edge in pinned:
-		_report.check("%s pins the %s edge" % [handle, edge],
-				absf(after[edge] - before[edge]) < EPS,
-				"%.5f -> %.5f" % [before[edge], after[edge]])
-	for edge in moved:
-		_report.check("%s moves the %s edge" % [handle, edge],
-				absf(after[edge] - before[edge]) > EPS,
-				"%.5f -> %.5f" % [before[edge], after[edge]])
+	var centre_after: Vector3 = win.content_3d.global_position
+	_report.check("%s keeps the content centre fixed" % handle,
+			centre_after.is_equal_approx(centre_before),
+			"%s -> %s" % [centre_before, centre_after])
+	_report.near("%s widens by %.1f" % [handle, expect_dw],
+			win.content_size.x - size_before.x, expect_dw, EPS)
+	_report.near("%s grows tall by %.1f" % [handle, expect_dh],
+			win.content_size.y - size_before.y, expect_dh, EPS)
 
 
-## World-space position of each side of the content screen.
-func _edges(win: SWindow) -> Dictionary:
-	var centre: Vector3 = win.content_3d.global_position
-	return {
-		"left": centre.x - win.content_size.x / 2.0,
-		"right": centre.x + win.content_size.x / 2.0,
-		"top": centre.y + win.content_size.y / 2.0,
-		"bottom": centre.y - win.content_size.y / 2.0,
-	}
+## Yaws the window by `yaw` radians, then drives an R-handle gesture whose grab
+## point is pushed 0.3 m along the window's own local +X. Returns the resulting
+## width change, which a rotation-safe resize must leave at 0.6 regardless of yaw.
+func _width_change_for_yaw(win: SWindow, yaw: float) -> float:
+	win.rotation = Vector3(0, yaw, 0)
+	win._apply_size(Vector2(1.5, 0.75))
+	var width_before: float = win.content_size.x
+
+	var origin: Vector3 = win.global_position
+	var local_x: Vector3 = win.global_transform.basis.x.normalized()
+	win.start_resize("R", Fixtures.press_at(win, origin))
+	win.update_resize(origin + local_x * 0.3)
+	win.stop_resize()
+	return win.content_size.x - width_before
