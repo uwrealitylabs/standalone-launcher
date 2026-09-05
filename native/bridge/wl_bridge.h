@@ -30,7 +30,6 @@ typedef enum {
 	WLB_EVENT_MAPPED,       /* width/height valid */
 	WLB_EVENT_UNMAPPED,
 	WLB_EVENT_RESIZED,      /* width/height valid */
-	WLB_EVENT_FRAME,        /* a new buffer is pending; acquire it */
 	WLB_EVENT_CLIENT_GONE,
 } wlb_event_type;
 

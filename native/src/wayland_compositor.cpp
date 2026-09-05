@@ -197,7 +197,6 @@ void WaylandCompositor::drain_events()
 		case WLB_EVENT_CLIENT_GONE:
 			emit_signal("client_gone");
 			break;
-		case WLB_EVENT_FRAME:
 		case WLB_EVENT_NONE:
 		default:
 			break;

@@ -216,7 +216,6 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
 	 */
 	drop_pending(server);
 	server->pending = wlr_buffer_lock(surface->current.buffer);
-	push_event(server, WLB_EVENT_FRAME, w, h);
 }
 
 
