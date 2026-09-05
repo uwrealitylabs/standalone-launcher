@@ -62,10 +62,8 @@ func _ready() -> void:
 
 	if not ClassDB.class_exists("WaylandCompositor"):
 		# Expected wherever the extension was not built: it targets Linux arm64
-		# and nothing else. Not a warning — nothing here is misconfigured. The
-		# engine also logs a red "No GDExtension library found" for the descriptor
-		# on such hosts; that is the same expected miss, named by the descriptor's
-		# filename (wayland_compositor.linux_arm64_only.gdextension).
+		# and nothing else, so this is not a misconfiguration. Godot's own red
+		# "No GDExtension library found" log on such hosts is the same expected miss.
 		print("[compositor_poc] WaylandCompositor unavailable off Linux arm64; "
 				+ "staying hidden.")
 		return

@@ -20,8 +20,7 @@ namespace godot {
  * ImageTexture.
  *
  * Owns polling and the texture, and nothing else: the client process belongs
- * to GDScript (see project/compositor/compositor_poc.gd), because splitting
- * process ownership across the language boundary is how zombies happen.
+ * to GDScript (see project/compositor/compositor_poc.gd).
  *
  * Bind the texture on `frame_available`, never on `surface_mapped` -- a
  * surface maps before any buffer has been converted, so get_texture() is still
