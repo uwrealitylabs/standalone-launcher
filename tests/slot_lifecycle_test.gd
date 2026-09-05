@@ -141,4 +141,17 @@ func _initialize() -> void:
 	_report.check("the last window keeps its slot and pose",
 			wm.slots[LEFT] == w3 and w3.transform.is_equal_approx(xf_before[w3]))
 
+	# --- opening into a freed slot moves no survivor -------------------------
+	# Only LEFT is occupied now, so a new window fills CENTRE (first in fill
+	# order). The lone survivor must not move or resize to accommodate it.
+	_report.section("open into a freed slot")
+	var w3_size := w3.content_size
+	var refill := wm.create_window()
+	await process_frame
+	_report.check("the new window fills the first free slot (CENTRE)",
+			wm.slots[CENTRE] == refill)
+	_report.check("the survivor did not move",
+			wm.slots[LEFT] == w3 and w3.transform.is_equal_approx(xf_before[w3]))
+	_report.check("the survivor was not resized", w3.content_size == w3_size)
+
 	_report.finish(self)
