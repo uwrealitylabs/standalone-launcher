@@ -1,13 +1,7 @@
 # Implementation plan — Spatial window layout, Phases F + 0
 
-This revision maps the parent spatial-window design to `main`. Phases F and 0
-ship together from a new `feat/spatial-slots` branch based on `main`; do not
-implement them on `spike/xr-compositor-poc`.
-
-The current checkout contains compositor work that is not on `main` just yet. The slot
-feature must not depend on `CompositorScreen` or its tests. If the compositor
-work merges first, keep `CompositorScreen` as a direct `WindowManager` child,
-outside `WindowLayer`.
+This document maps the spatial-window design onto the current windowing code.
+Phases F and 0 ship together as one release unit.
 
 ## 1. Contracts and phase boundary
 
@@ -15,7 +9,7 @@ outside `WindowLayer`.
 - Focus changes input routing, MRU history, and header styling only. It never
   changes a slot or transform.
 - `WindowManager` is the only owner of window transforms. A window owns its
-  persistent `docked_size` and internal geometry.
+  persistent `content_size` and internal geometry.
 - A resize keeps the content centre fixed and grows symmetrically. This replaces
   the current opposite-edge-pinned interaction.
 - Header dragging is disabled when the arc is enabled. Slot reordering returns
@@ -62,7 +56,9 @@ WindowManager            workspace-local origin; moved by WindowFollow
 ```
 
 Any unrelated manager child introduced by another feature remains a direct
-child and is not assigned a slot.
+child and is not assigned a slot. If `CompositorScreen` is present, move it clear
+of the arc — for example `+6.0` m in Y — so it cannot overlap a slot; confirm the
+move changes no test.
 
 Add typed manager state:
 
@@ -98,7 +94,7 @@ manager.
 
 Centralize slot mutations in small manager helpers such as `_slot_of(win)`,
 `_assign_slot(win, slot)`, and `_clear_slot(win)`. `_assign_slot` applies only
-the target transform; none of these helpers reads or writes `docked_size`. They
+the target transform; none of these helpers reads or writes `content_size`. They
 give later stash/reorder phases one state path without exposing those features
 in Phase 0.
 
@@ -116,12 +112,12 @@ window, show it when focus exists, and continue routing key signals through the
 manager. Update tests that search only direct manager children to search beneath
 `KeyboardAnchor`.
 
-### F2. Rename and centralize size mutation
+### F2. Centralize size mutation
 
-Rename `content_size` to `docked_size` throughout code and tests. Seed it from
-the authored `content_3d.screen_size` in `_ready()` as today.
+Keep the existing `content_size` member; no rename. It is still seeded from the
+authored `content_3d.screen_size` in `_ready()` as today.
 
-Keep `_apply_size(committed, live)` as the sole writer of `docked_size` and the
+Keep `_apply_size(committed, live)` as the sole writer of `content_size` and the
 sole updater of quad, collider, header, handle, and render-target geometry. It
 may retain the local numeric `MIN_CONTENT_SIZE`/`MAX_CONTENT_SIZE` clamp as a
 defensive fallback for standalone windows.
@@ -130,7 +126,7 @@ All managed size requests, including the public `resize()` method and pointer
 gestures, must pass through:
 
 ```gdscript
-WindowManager.clamp_docked_size(win, desired) -> Vector2
+WindowManager.clamp_content_size(win, desired) -> Vector2
 ```
 
 This prevents startup code or a future caller from bypassing the angular
@@ -144,10 +140,14 @@ introducing a second size-write path.
 At `start_resize()`:
 
 1. Focus first.
-2. Freeze `global_transform.orthonormalized()`.
-3. Build the plane from its unit `basis.z` and origin.
-4. Resolve and store the grab point on that plane.
-5. Cache unit world axes `basis.x`, `basis.y`, and the starting `docked_size`.
+2. Freeze the window's orthonormalized `global_transform`.
+3. Build a frozen interaction plane: its normal is the window's normalized face
+   normal (`basis.z`), and it passes through the selected handle collider's depth
+   centre rather than the window origin.
+4. Resolve and store the grab point by intersecting the pointer ray with that
+   plane. Do not use the raw physics collision point: it sits on the collider
+   surface and exists only for target selection and cursor rendering.
+5. Cache unit world axes `basis.x`, `basis.y`, and the starting `content_size`.
 
 Do not cache a start position; resizing never changes the window origin.
 
@@ -166,13 +166,14 @@ BL: dw = -2dx, dh = -2dy
 
 The factor of two is required: the grabbed edge follows the pointer while the
 opposite edge moves by the same amount around the fixed centre. Send
-`start_size + (dw, dh)` through `resize(..., true)`. Delete all resize position
-shift state and writes. `_get_plane()` must also use the live transformed face
-normal for any non-gesture caller.
+`start_size + (dw, dh)` through `resize(..., true)`. Each move intersects that
+same frozen plane — never the raw collision point. Delete all resize position
+shift state and writes. If any non-gesture caller of `_get_plane()` remains, it
+must likewise use the live transformed face normal.
 
-Cache the manager's legal docked-width cap when the gesture starts, as required
+Cache the manager's legal content-width cap when the gesture starts, as required
 by the parent design, and use it throughout that gesture. To keep that cached
-cap sound, allow only one docked resize gesture at a time: the manager tracks the
+cap sound, allow only one managed resize gesture at a time: the manager tracks the
 active resize owner and ignores a second handle press until release/cancel.
 Opening, closing, stashing, or programmatic resizing another window must cancel
 the active gesture before changing the set or widths. This resolves the
@@ -182,7 +183,9 @@ incompatible caps and then violate the invariant.
 ### F4. Split focus and lifetime state
 
 `focus(win)` must reject invalid, non-open, non-slotted, or suspended windows.
-Otherwise it:
+A *suspended* window is one hidden behind a solo presentation — every non-soloed
+window while `soloed_window` is set. That cannot occur until solo mode arrives in
+a later phase, so no Phase 0 window is suspended. Otherwise `focus(win)`:
 
 1. Disables keyboard/gamepad input on the old focused window.
 2. Removes `win` from `focus_history` and pushes it at index 0.
@@ -255,20 +258,30 @@ beta(w)   = atan(w / (2R))
 w(beta)   = 2R * tan(beta)
 ```
 
-Validate before creating startup windows and fail loudly in debug/headless runs:
+Validate whenever the tunables change, including before creating startup windows.
+Split the checks by severity so a bad tune degrades rather than crashes.
+
+Hard preconditions — the geometry is undefined without them. Fail loudly in
+debug/headless runs, and in a release build clamp to a sane value rather than
+dividing by zero or taking `tan` of a right angle:
 
 - `R > 0`.
 - `0 < theta < PI/2`.
-- `0 <= g < theta`.
 - `0 < beta_default < PI/2`.
+- `g >= 0`.
+- `min_height <= default_height <= max_height`, all within numeric safety limits.
+
+Fit constraints — the math still runs, but windows may overlap or be clamped
+below their default. Emit one non-fatal warning per violation; never abort:
+
+- `g < theta`.
 - `2 * beta_default + g <= theta`, so adjacent default windows fit.
 - `w_default` is within the numeric width safety limits.
 - Numeric minimum width is no greater than `w_default`.
-- `min_height <= default_height <= max_height`, all within numeric safety
-  limits.
 
 The geometry is scale-similar only when `R` and every metre size scale together.
-Changing `R` at runtime does not silently rescale existing `docked_size` values.
+Changing `R` at runtime does not silently rescale existing `content_size` values;
+it re-runs the checks above, so a violation warns rather than passing unnoticed.
 
 ### P0.3. Permutation-safe width clamp
 
@@ -292,15 +305,15 @@ beta_i_max    = theta - g - largest_other
 w_i_max       = 2R * tan(beta_i_max)
 ```
 
-`max_docked_width_for(win)` scans `open_windows` directly rather than caching
+`max_content_width_for(win)` scans `open_windows` directly rather than caching
 the two leaders; a removal can expose an unknown third value and the collection
 is deliberately small. Return `min(numeric_max_width, w_i_max)`. Do not floor an
 invalid maximum up to the numeric minimum, because that could violate the
 angular invariant; startup validation must guarantee that a numeric-minimum
 window is legal beside a default window.
 
-`clamp_docked_size()` clamps width to
-`[numeric_min_width, max_docked_width_for(win)]` and height to the configured
+`clamp_content_size()` clamps width to
+`[numeric_min_width, max_content_width_for(win)]` and height to the configured
 height range intersected with numeric safety limits.
 
 After every managed size commit, the following must hold over all open windows:
@@ -312,7 +325,7 @@ beta_1 + beta_2 + g <= theta
 At gesture start, compute and store this cap on `SWindow` after the manager has
 granted exclusive resize ownership. Non-gesture calls compute a fresh cap for
 that single atomic request. Recompute by scanning whenever the open set or a
-docked width changes; do not maintain a cached global top-two index.
+content width changes; do not maintain a cached global top-two index.
 
 ### P0.4. Open and close lifecycle
 
@@ -328,15 +341,18 @@ Opening:
 2. If none exists, return `null` and issue one clear warning without
    instantiating or mutating state. Phase 2 replaces this rejection with stash
    behavior.
-3. Instantiate and assign the manager reference.
+3. Instantiate, assign the manager reference, and reconnect the window's
+   `on_closed`/`on_focused` signals to the manager (the header press routes
+   through the general focus handler; the old positional wiring is gone).
 4. Parent under `WindowLayer`, add to `open_windows`, occupy the slot, and apply
    its slot transform.
 5. Install content, apply `(w_default, default_height)` through the managed size
    path, then focus it.
 
 A caller may immediately request another initial size through `resize()`; it is
-clamped for that slot and never changes an existing window. Preserve the current
-application-menu request for a browse-friendly size, subject to that clamp.
+clamped for that slot and never changes an existing window. The application menu
+opens at the default size, the same as the terminal — no special browse-friendly
+request — so nothing relies on a width the clamp might refuse.
 
 Closing:
 
@@ -349,8 +365,8 @@ Closing:
 5. Do not compact slots or move survivors.
 
 Update startup creation to use this path. The menu occupies `CENTRE`; the
-terminal occupies `RIGHT`. Sparse states such as `[LEFT, empty, RIGHT]` remain
-valid.
+terminal occupies `RIGHT` and is focused at startup, matching current behaviour.
+Sparse states such as `[LEFT, empty, RIGHT]` remain valid.
 
 In the same atomic cutover:
 
@@ -409,19 +425,21 @@ hand tracking, or rendering performance without board testing.
 - Update `tests/resize_handle_test.gd`: a `0.3 m` edge displacement changes the
   dimension by `0.6 m`; remove the next-Z-layer test; retain band tiling,
   thickness, collision-mask, and pickability checks; add affordance visibility.
-- Update `tests/window_size_check.gd` for `docked_size`, fixed centre, doubled
-  edge deltas, rotated axes, and the managed resize path.
+- Update `tests/window_size_check.gd` for fixed centre, doubled edge deltas,
+  rotated axes, and the managed resize path.
 - Update `tests/app_search_focus_test.gd` to use `open_windows` and find the
   keyboard below `KeyboardAnchor`.
 - Update `tests/virtual_keyboard_input_test.gd` for the keyboard's new parent.
-- Update any remaining `windows_list`, `content_size`, positional
-  `create_window`, or Z-order references found by `rg`.
+- Update any remaining `windows_list`, positional `create_window`, or Z-order
+  references found by `rg`.
 
 ### State and lifecycle assertions
 
 - Startup occupies `CENTRE`, then `RIGHT`; the third open uses `LEFT`.
+- Startup focuses the terminal (`RIGHT`), and both startup windows open at the
+  default size.
 - A fourth open returns `null` and changes no state.
-- Focus changes no slot, transform, open-list order, or `docked_size`.
+- Focus changes no slot, transform, open-list order, or `content_size`.
 - Repeated focus creates no duplicate history entries.
 - Closing a focused window promotes the most recent surviving window.
 - Closing a non-focused window leaves focus unchanged.
@@ -431,7 +449,7 @@ hand tracking, or rendering performance without board testing.
   transitions are not tested until Phase 2; only the Phase 0 clamp's required
   treatment of a valid stashed fixture is covered now.
 - A model-level slot/stash/reassignment fixture changes only placement state;
-  the window's `docked_size` is unchanged. It does not expose stashing as a
+  the window's `content_size` is unchanged. It does not expose stashing as a
   Phase 0 user operation.
 
 ### Geometry and resize assertions
@@ -453,6 +471,8 @@ hand tracking, or rendering performance without board testing.
 - A second simultaneous resize gesture is rejected or deferred, and closing
   the active window clears manager resize ownership.
 - Opening a default window into any empty slot moves/resizes no survivor.
+- A fit-constraint violation (e.g. `2 * beta_default + g > theta`) warns but still
+  builds the layout; a hard-precondition violation is rejected or clamped.
 
 ### Hover and keyboard assertions
 
@@ -476,17 +496,17 @@ Keep every commit parseable and its affected tests green:
 
 1. Add `WindowLayer`/`KeyboardAnchor`, reparent the keyboard, and update keyboard
    discovery tests without changing window placement.
-2. Rename `content_size` to `docked_size`; introduce the single managed resize
-   gateway while it still performs only numeric clamping.
+2. Introduce the single managed resize gateway (`clamp_content_size`) while it
+   still performs only numeric clamping; no member rename.
 3. Implement rotation-safe fixed-centre resize and rewrite its focused tests.
 4. Add pure slot geometry, tunable validation, and permutation-cap helpers with
    headless unit coverage, but do not switch live placement yet.
 5. Atomically switch lifecycle/focus to explicit state and tangent slots; remove
    the old Z stack and free drag; replace the Z-order suite and update startup
-   tests.
+   tests. Width safety is not enforced between this step and step 6, so two wide
+   neighbours can overlap; do not assert non-overlap here.
 6. Enable the permutation-safe clamp for every managed size path and add
    opening/full-capacity/sparse-layout coverage.
 7. Add target hover delivery and resize affordances with transition tests.
 
-Phases F + 0 are complete only after steps 1–7 pass together. The feature branch
-then needs device validation before merge.
+Phases F + 0 are complete only after steps 1–7 pass together.
