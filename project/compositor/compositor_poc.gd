@@ -14,7 +14,8 @@ extends MeshInstance3D
 ## has been bound. A host with no GDExtension — every macOS and x86_64 machine —
 ## therefore renders nothing at all, rather than an untextured white quad.
 
-const CLIENT_COMMAND := "weston-simple-shm"
+## Default client. Overridable via WRL_COMPOSITOR_CLIENT
+const DEFAULT_CLIENT_COMMAND := "weston-simple-shm"
 
 ## Exit code a shell reports for "command not found". [method OS.create_process]
 ## cannot report a failed exec, so a missing client still yields a live pid and
@@ -27,10 +28,24 @@ const TERM_GRACE_SECONDS := 2.0
 ## Metres. The quad's height; width follows the surface aspect ratio.
 const QUAD_HEIGHT := 0.6
 
+## Emitted once teardown is complete: the client is reaped and the server stopped.
+## Fires exactly once per node, even when there was nothing to stop, so a caller
+## can `await` it to sequence its own quit. See [method request_shutdown].
+signal shutdown_finished
+
 var _compositor: Node = null
 var _client_pid: int = -1
 var _terminating_since: float = -1.0
 var _material: StandardMaterial3D = null
+var _client_command: String = DEFAULT_CLIENT_COMMAND
+
+## Set once [method request_shutdown] is accepted. Distinguishes a requested
+## teardown, which ends in [signal shutdown_finished], from a client that merely
+## exits or crashes on its own, which does not.
+var _shutdown_requested: bool = false
+
+## Guards [method _finish_shutdown] so [signal shutdown_finished] fires only once.
+var _shutdown_finished_sent: bool = false
 
 
 ## Brings up the server and the client, or leaves the node dormant and hidden.
@@ -40,6 +55,10 @@ func _ready() -> void:
 	# no visible quad and no per-frame callback.
 	visible = false
 	set_process(false)
+
+	var override := OS.get_environment("WRL_COMPOSITOR_CLIENT")
+	if override != "":
+		_client_command = override
 
 	if not ClassDB.class_exists("WaylandCompositor"):
 		# Expected wherever the extension was not built: it targets Linux arm64
@@ -83,6 +102,10 @@ func _process(_delta: float) -> void:
 		_escalate_if_term_expired()
 		return
 	_reap_client()
+	# Only a requested teardown ends in shutdown_finished; a client that exited
+	# on its own just leaves the node dormant.
+	if _shutdown_requested:
+		_finish_shutdown()
 
 
 ## Drops a compositor that failed to start. Processing is stopped before the
@@ -106,15 +129,37 @@ func _launch_client() -> void:
 	_client_pid = OS.create_process("/usr/bin/env", [
 		"XDG_RUNTIME_DIR=" + runtime_dir,
 		"WAYLAND_DISPLAY=" + socket,
-		CLIENT_COMMAND,
+		_client_command,
 	])
 	if _client_pid == -1:
-		push_error("Could not spawn %s." % CLIENT_COMMAND)
+		push_error("Could not spawn %s." % _client_command)
 		set_process(false)
 		return
 	set_process(true)
 	print("[compositor_poc] launched %s (pid %d) on %s/%s"
-			% [CLIENT_COMMAND, _client_pid, runtime_dir, socket])
+			% [_client_command, _client_pid, runtime_dir, socket])
+
+
+## Begins an orderly, frame-driven teardown and returns immediately, leaving
+## processing on so [method _process] can carry it out without blocking the main
+## thread. Idempotent: later calls are ignored. Callers may await
+## [signal shutdown_finished] to learn when it is done.
+##
+## SIGTERM is sent once here; [method _process] escalates to SIGKILL after
+## [constant TERM_GRACE_SECONDS] and reaps. With no live client — off Linux arm64,
+## or after the client already exited — there is nothing to signal, so completion
+## is deferred to the next frame rather than skipped, keeping the signal contract.
+func request_shutdown() -> void:
+	if _shutdown_requested:
+		return
+	_shutdown_requested = true
+	if _client_pid == -1:
+		_finish_shutdown.call_deferred()
+		return
+	# TERM through the shell: OS.kill only sends SIGKILL. _process owns the wait,
+	# the escalation and the reap from here on.
+	OS.execute("kill", ["-TERM", str(_client_pid)])
+	_terminating_since = Time.get_ticks_msec() / 1000.0
 
 
 func _reap_client() -> void:
@@ -125,7 +170,7 @@ func _reap_client() -> void:
 	set_process(false)
 	if code == EXIT_NOT_FOUND:
 		push_error("%s is not installed; nothing will be displayed."
-				% CLIENT_COMMAND)
+				% _client_command)
 	else:
 		print("[compositor_poc] client exited with code %d" % code)
 
@@ -136,32 +181,45 @@ func _escalate_if_term_expired() -> void:
 	var waited := (Time.get_ticks_msec() / 1000.0) - _terminating_since
 	if waited < TERM_GRACE_SECONDS:
 		return
-	push_warning("%s ignored SIGTERM; sending SIGKILL." % CLIENT_COMMAND)
+	push_warning("%s ignored SIGTERM; sending SIGKILL." % _client_command)
 	OS.kill(_client_pid)
 	_terminating_since = -1.0
 
 
-func _stop_client() -> void:
-	if _client_pid == -1:
+## Completes a requested teardown: stops the server, drops all state and emits
+## [signal shutdown_finished] once. Runs after [method _process] reaps the client,
+## or straight from [method request_shutdown] when there was nothing to stop.
+func _finish_shutdown() -> void:
+	if _shutdown_finished_sent:
 		return
-	# TERM first, then a bounded wait, then KILL. OS.kill sends SIGKILL, so the
-	# polite signal has to go through the shell.
-	OS.execute("kill", ["-TERM", str(_client_pid)])
-	_terminating_since = Time.get_ticks_msec() / 1000.0
-
-	var deadline := Time.get_ticks_msec() + int(TERM_GRACE_SECONDS * 1000.0)
-	while Time.get_ticks_msec() < deadline and OS.is_process_running(_client_pid):
-		OS.delay_msec(20)
-	if OS.is_process_running(_client_pid):
+	_shutdown_finished_sent = true
+	if _client_pid != -1:
+		# Only reached if finish ran without a reap; never leave a live child.
 		OS.kill(_client_pid)
-	_reap_client()
-
-
-func _exit_tree() -> void:
-	_stop_client()
+		_client_pid = -1
+	_terminating_since = -1.0
+	set_process(false)
 	if _compositor != null:
 		print("[compositor_poc] stats: ", _compositor.get_stats())
 		_compositor.stop()
+		_compositor = null
+	shutdown_finished.emit()
+
+
+## Safety net for a teardown that bypassed [method request_shutdown] — the node
+## being freed directly. Unlike the graceful path, [method _exit_tree] gets no
+## further [method _process] callbacks, so there is nothing to drive a grace
+## period; kill the client outright rather than block the main thread waiting.
+func _exit_tree() -> void:
+	if _client_pid != -1:
+		push_warning("compositor_poc torn down without graceful shutdown; "
+				+ "killing %s immediately." % _client_command)
+		OS.kill(_client_pid)
+		_client_pid = -1
+	if _compositor != null:
+		print("[compositor_poc] stats: ", _compositor.get_stats())
+		_compositor.stop()
+		_compositor = null
 
 
 func _on_surface_mapped(size: Vector2i) -> void:
