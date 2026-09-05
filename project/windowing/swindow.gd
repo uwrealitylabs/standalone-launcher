@@ -31,6 +31,9 @@ var _resize_start_size := Vector2.ZERO
 var _resize_x_axis     := Vector3.RIGHT
 var _resize_y_axis     := Vector3.UP
 var _resize_plane      := Plane()
+# The permutation-safe width cap, frozen at gesture start. The manager reads it
+# through clamp_content_size while _resizing so mid-gesture frames need no rescan.
+var _resize_max_width  := MAX_CONTENT_SIZE.x
 
 # Grab bands straddling the content edges, keyed by handle id
 var _resize_handles := {}
@@ -176,10 +179,17 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	var hit = _resolve_pointer_hit(event, _resize_plane)
 	if hit == null:
 		return
+	# Take exclusive resize ownership before freezing any gesture state; a refusal
+	# (another window is already resizing) leaves this window untouched.
+	if manager and not manager.acquire_resize(self):
+		return
 	_resizing          = true
 	_resize_handle     = handle
 	_resize_start_hit  = hit
 	_resize_start_size = content_size
+	# Freeze the width cap for the whole gesture: exclusive ownership means no other
+	# window's width changes, so this cap stays valid until release.
+	_resize_max_width  = manager.max_content_width_for(self) if manager else MAX_CONTENT_SIZE.x
 	# Cache the world axes so displacement is measured in the window's own frame
 	# regardless of yaw. The origin is never cached: a resize never moves it.
 	_resize_x_axis     = xf.basis.x
@@ -223,6 +233,8 @@ func update_resize(hit_world: Vector3) -> void:
 func stop_resize() -> void:
 	_resizing      = false
 	_resize_handle = ""
+	if manager:
+		manager.release_resize(self)
 	set_process(false)
 	# Gesture over: settle exactly, whatever the throttle last committed
 	_apply_size(content_size)

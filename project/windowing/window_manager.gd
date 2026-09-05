@@ -41,6 +41,11 @@ var focused_window: SWindow = null
 var focus_history: Array[SWindow] = [] # index 0 is most recent
 var soloed_window: SWindow = null
 
+# The window currently granted exclusive resize ownership, or null. Only one
+# window may resize at a time: the cap it froze at gesture start stays valid
+# because no other window's width can change underneath it.
+var resizing_window: SWindow = null
+
 
 ## Opens a window showing `content` in the first empty slot (CENTRE, then RIGHT,
 ## then LEFT), sizes it to the layout default, and focuses it. Returns null and
@@ -131,10 +136,36 @@ func _first_empty_slot() -> int:
 
 ## Clamps `desired` to the size policy for `win`. The single gateway every
 ## managed size request passes through, so no caller can bypass the policy.
-## Numeric-only for now; the angular permutation bound is wired in here in a
-## later step, once max_content_width_for governs live placement.
+## Width is bounded by the permutation-safe angular cap so no size change can push
+## two windows closer than one slot separation; height is bounded by the
+## configured range intersected with the numeric safety limits. During a resize
+## the width cap is the one frozen at gesture start (exclusive ownership keeps it
+## valid); every other call recomputes it for that single atomic request.
 func clamp_content_size(win: SWindow, desired: Vector2) -> Vector2:
-	return desired.clamp(win.MIN_CONTENT_SIZE, win.MAX_CONTENT_SIZE)
+	var max_w: float = win._resize_max_width if win._resizing else max_content_width_for(win)
+	var min_h: float = maxf(min_height, win.MIN_CONTENT_SIZE.y)
+	var max_h: float = minf(max_height, win.MAX_CONTENT_SIZE.y)
+	return Vector2(
+			clampf(desired.x, win.MIN_CONTENT_SIZE.x, max_w),
+			clampf(desired.y, min_h, max_h))
+
+
+## Grants `win` exclusive resize ownership. Returns false without changing state
+## when another still-valid window already holds it, so a second simultaneous
+## gesture is refused rather than corrupting the frozen cap. Idempotent for the
+## current owner.
+func acquire_resize(win: SWindow) -> bool:
+	if resizing_window != null and resizing_window != win \
+			and is_instance_valid(resizing_window):
+		return false
+	resizing_window = win
+	return true
+
+
+## Releases `win`'s resize ownership. No-op when it is not the owner.
+func release_resize(win: SWindow) -> void:
+	if resizing_window == win:
+		resizing_window = null
 
 
 # --- Phase 0 slot geometry -------------------------------------------------
@@ -278,6 +309,7 @@ func _update_focus_visuals() -> void:
 ## recent surviving slotted window. Survivors are never moved or resized, so a
 ## sparse slot layout is left as-is.
 func _on_window_closed(win: SWindow) -> void:
+	release_resize(win) # closing the active window clears resize ownership
 	_clear_slot(win)
 	open_windows.erase(win)
 	focus_history.erase(win)
