@@ -39,8 +39,12 @@ func _find_menu(wm: WindowManager) -> Array:
 
 
 ## The XRToolsVirtualKeyboard2D inside the WindowManager's keyboard, or null.
+## The keyboard lives beneath KeyboardAnchor, not directly under the manager.
 func _find_keyboard(wm: WindowManager) -> XRToolsVirtualKeyboard2D:
-	for child in wm.get_children():
+	var anchor := wm.get_node_or_null("KeyboardAnchor")
+	if anchor == null:
+		return null
+	for child in anchor.get_children():
 		if child is XRToolsViewport2DIn3D:
 			var inst = child.get_scene_instance()
 			if inst is XRToolsVirtualKeyboard2D:
