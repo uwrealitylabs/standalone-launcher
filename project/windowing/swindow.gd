@@ -16,6 +16,11 @@ class_name SWindow extends Node3D
 signal on_closed()
 signal on_focused(win: SWindow)
 
+# The manager that owns this window's placement and size policy. Null for a
+# standalone window (e.g. a headless test fixture), which falls back to the
+# numeric clamp below.
+var manager: WindowManager = null
+
 ## This window's depth order (higher = more in front)
 var z_order: int = 0
 
@@ -333,10 +338,17 @@ func stop_resize() -> void:
 	_apply_size(content_size)
 
 
-## Resizes the window's content to `size`, clamped to MIN/MAX_CONTENT_SIZE.
-## For a one-off resize outside of a pointer drag, e.g. at creation.
-func resize(size: Vector2) -> void:
-	_apply_size(size)
+## Resizes the window's content to `desired`. All managed size requests route
+## through the manager's clamp so no caller can bypass the layout's size policy;
+## a standalone window falls back to the numeric clamp. `live` omits the render
+## resolutions, as in [method _apply_size].
+func resize(desired: Vector2, live: bool = false) -> void:
+	var clamped: Vector2
+	if manager:
+		clamped = manager.clamp_content_size(self, desired)
+	else:
+		clamped = desired.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
+	_apply_size(clamped, live)
 
 
 ## Resizes the window's content to `new_size`, clamped to MIN/MAX_CONTENT_SIZE,

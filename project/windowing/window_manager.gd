@@ -20,6 +20,7 @@ var _keyboard: Node3D = null
 ## Spawns a window at `pos` showing `content`, focused and frontmost.
 func create_window(pos: Vector3 = Vector3.ZERO, content: PackedScene = null) -> SWindow:
 	var win: SWindow = window.instantiate()
+	win.manager = self
 	win.position = pos
 	add_child(win)
 	windows_list.append(win)
@@ -117,6 +118,13 @@ func move_backward(win: Node3D) -> void:
 		windows_list[index] = other
 		windows_list[index - 1] = win
 		_recalculate_z_order()
+
+
+## Clamps `desired` to the size policy for `win`. The single gateway every
+## managed size request passes through, so no caller can bypass the policy.
+## Numeric-only for now; the angular permutation bound is added in Phase 0.
+func clamp_content_size(win: SWindow, desired: Vector2) -> Vector2:
+	return desired.clamp(win.MIN_CONTENT_SIZE, win.MAX_CONTENT_SIZE)
 
 
 ## Get the currently focused (frontmost) window
