@@ -72,6 +72,7 @@ struct wlb_server {
 	struct wl_listener surface_unmap;
 	struct wl_listener surface_destroy;
 	struct wl_listener xdg_surface_commit;
+	struct wl_listener xdg_toplevel_destroy;
 	int listeners_armed;
 };
 
@@ -170,6 +171,15 @@ static void send_frame_done(wlb_server *server)
 	}
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	wlr_surface_send_frame_done(server->surface, &now);
+	/*
+	 * Flush now rather than leaving it to the next wlb_poll. The callback has
+	 * to reach the client this frame so it can render and commit its next
+	 * buffer before the next poll dispatches it; otherwise a frame-callback-
+	 * paced client advances only every other Godot frame. Godot still does not
+	 * consume that buffer during this _process -- the win is full-rate pacing,
+	 * not same-frame turnaround.
+	 */
+	wl_display_flush_clients(server->display);
 }
 
 
@@ -250,7 +260,31 @@ static void detach_surface(wlb_server *server)
 	wl_list_remove(&server->surface_unmap.link);
 	wl_list_remove(&server->surface_destroy.link);
 	wl_list_remove(&server->xdg_surface_commit.link);
+	wl_list_remove(&server->xdg_toplevel_destroy.link);
 	server->listeners_armed = 0;
+}
+
+
+/*
+ * Full client-gone cleanup, shared by the wl_surface-destroy and
+ * xdg_toplevel-destroy paths. Idempotent: whichever destroy signal fires first
+ * runs this and detaches every listener, so the second becomes a no-op and
+ * CLIENT_GONE is pushed exactly once.
+ */
+static void teardown_client(wlb_server *server)
+{
+	if (!server->listeners_armed) {
+		return;
+	}
+	drop_pending(server);
+	detach_surface(server);
+	server->surface = NULL;
+	server->toplevel = NULL;
+	server->mapped = 0;
+	server->width = 0;
+	server->height = 0;
+	bridge_log("tracked toplevel removed");
+	push_event(server, WLB_EVENT_CLIENT_GONE, 0, 0);
 }
 
 
@@ -259,15 +293,23 @@ static void handle_surface_destroy(struct wl_listener *listener, void *data)
 	wlb_server *server = wl_container_of(listener, server, surface_destroy);
 
 	(void)data;
-	drop_pending(server);
-	detach_surface(server);
-	server->surface = NULL;
-	server->toplevel = NULL;
-	server->mapped = 0;
-	server->width = 0;
-	server->height = 0;
-	bridge_log("surface destroyed");
-	push_event(server, WLB_EVENT_CLIENT_GONE, 0, 0);
+	teardown_client(server);
+}
+
+
+/*
+ * The xdg_toplevel role object can be destroyed while its wl_surface lives on.
+ * wlroots frees the wlr_xdg_toplevel right after this signal, so tearing down
+ * here is what keeps server->toplevel (and the xdg_surface commit listener that
+ * dereferences it) from outliving the object.
+ */
+static void handle_xdg_toplevel_destroy(struct wl_listener *listener, void *data)
+{
+	wlb_server *server = wl_container_of(listener, server,
+			xdg_toplevel_destroy);
+
+	(void)data;
+	teardown_client(server);
 }
 
 
@@ -308,6 +350,8 @@ static void handle_new_toplevel(struct wl_listener *listener, void *data)
 	wl_signal_add(&server->surface->events.destroy, &server->surface_destroy);
 	server->xdg_surface_commit.notify = handle_xdg_surface_commit;
 	wl_signal_add(&server->surface->events.commit, &server->xdg_surface_commit);
+	server->xdg_toplevel_destroy.notify = handle_xdg_toplevel_destroy;
+	wl_signal_add(&toplevel->events.destroy, &server->xdg_toplevel_destroy);
 	server->listeners_armed = 1;
 
 	bridge_log("toplevel accepted");
