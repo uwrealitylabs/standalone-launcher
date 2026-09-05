@@ -11,11 +11,6 @@ class_name WindowManager extends Node3D
 var windows_list: Array[SWindow] = []
 var _focused: SWindow = null
 
-# The virtual keyboard instance and its 2D scene. The keyboard lives under
-# KeyboardAnchor at identity so its world pose is authored in the scene, not in
-# code, and is shown only while a window holds focus.
-var _keyboard: Node3D = null
-
 
 ## Spawns a window at `pos` showing `content`, focused and frontmost.
 func create_window(pos: Vector3 = Vector3.ZERO, content: PackedScene = null) -> SWindow:
@@ -39,21 +34,14 @@ func create_window(pos: Vector3 = Vector3.ZERO, content: PackedScene = null) -> 
 
 ## Creates a virtual keyboard under KeyboardAnchor, linking its input to the
 ## windowing system. The anchor carries the authored pose; the keyboard is an
-## identity child of it. Hidden until a window holds focus.
+## identity child of it. Always visible: hiding it would stop rendering but leave
+## its collider pickable, so keys could still be pressed on an invisible board.
 func create_keyboard() -> void:
 	var kb: Node3D = keyboard.instantiate()
 	$KeyboardAnchor.add_child(kb)
 
-	_keyboard = kb
 	var kb_2d: XRToolsVirtualKeyboard2D = kb.get_scene_instance()
 	kb_2d.key_pressed.connect(_on_key_pressed)
-	_update_keyboard_visibility()
-
-
-## Shows the keyboard only while a window holds focus.
-func _update_keyboard_visibility() -> void:
-	if _keyboard:
-		_keyboard.visible = _focused != null
 
 
 ## Invoked on (virtual) keyboard input
@@ -153,7 +141,6 @@ func _on_window_closed(win: Node3D) -> void:
 	# promote the new frontmost window so input focus matches the visual state
 	if not _focused and not windows_list.is_empty():
 		_on_window_focused(windows_list[-1])
-	_update_keyboard_visibility()
 
 
 ## Focuses `win`, bringing it to the front and routing input to it. No-op when
@@ -170,7 +157,6 @@ func _on_window_focused(win: SWindow) -> void:
 	bring_to_front(win)
 	win.set_input_enabled(true)
 	_focused = win
-	_update_keyboard_visibility()
 
 
 func _ready() -> void:
