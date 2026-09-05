@@ -148,8 +148,8 @@ later tests because they are likely to make DMA-BUF support important.
 - Set `WAYLAND_DISPLAY` only for the launched test client, for example through
   `/usr/bin/env`. Do not change it globally inside the launcher, which would
   redirect every subsequently launched child.
-- Build the GDExtension and native dependencies for arm64 at the start of Card
-  1. A host-only build does not prove deployment on the RB 5.
+- Build the GDExtension and native dependencies for arm64 at the start of
+  the follow-up. A host-only build does not prove deployment on the RB 5.
 - Keep all wlroots objects inside the C bridge and expose only a narrow C API
   for initialization, polling, frame access/release, and shutdown.
 - Shut down clients and the Wayland display before releasing bridge-owned
