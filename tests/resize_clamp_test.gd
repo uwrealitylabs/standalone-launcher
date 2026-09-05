@@ -20,7 +20,6 @@ extends SceneTree
 const Report := preload("res://tests/support/report.gd")
 const Fixtures := preload("res://tests/support/window_fixtures.gd")
 
-const SPAWN := Vector3(0.0, 1.2, -2.0)
 # Clears any clamp in a single frame; a small step would land near the limit and
 # pass whether or not the clamp is applied correctly.
 const BIG := 9.0
@@ -34,14 +33,22 @@ func _centre(win: SWindow) -> Vector3:
 	return win.content_3d.global_position
 
 
+## The world displacement of a `local` offset in `win`'s own frame. Slots are
+## yawed, so a gesture expressed in window-local axes must be rotated into world
+## space before it is fed to the pointer.
+func _world(win: SWindow, local: Vector3) -> Vector3:
+	return win.global_transform.basis * local
+
+
 ## Runs one resize gesture on a fresh window: grabs `handle` at the window
-## origin, then jumps the pointer by `travel` in a single MOVED frame. Returns
-## the window, left mid-gesture for the caller to inspect and close.
+## origin, then jumps the pointer by `travel` (given in the window's local frame)
+## in a single MOVED frame. Returns the window, left mid-gesture for the caller
+## to inspect and close.
 func _resize(wm: WindowManager, handle: String, travel: Vector3) -> SWindow:
-	var win := wm.create_window(SPAWN)
+	var win := wm.create_window()
 	var origin: Vector3 = win.global_position
 	win.start_resize(handle, Fixtures.press_at(win, origin))
-	win.update_resize(origin + travel)
+	win.update_resize(origin + _world(win, travel))
 	return win
 
 
@@ -56,9 +63,10 @@ func _initialize() -> void:
 	root.add_child(wm)
 	await process_frame
 
-	# Every test window spawns at the same pose, so its content centre is the
-	# same fixed point a correct resize must preserve.
-	var probe := wm.create_window(SPAWN)
+	# Every test window spawns into the same slot (startup fills CENTRE and RIGHT,
+	# so each temporary window lands in LEFT), giving one fixed content centre a
+	# correct resize must preserve.
+	var probe := wm.create_window()
 	await process_frame
 	var s0: Vector2 = probe.content_size
 	_expected_centre = _centre(probe)
@@ -99,8 +107,8 @@ func _initialize() -> void:
 	# residue in the frames that follow it.
 	_report.section("recovering from a clamped frame")
 	w = _resize(wm, "R", Vector3(BIG, 0, 0))
-	var origin := SPAWN
-	w.update_resize(origin + Vector3(0.1, 0, 0))
+	var origin := w.global_position
+	w.update_resize(origin + _world(w, Vector3(0.1, 0, 0)))
 	_report.near("width follows the pointer again", w.content_size.x, s0.x + 0.2)
 	_centre_holds(w, "recovered")
 	w.stop_resize()

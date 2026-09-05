@@ -1,16 +1,17 @@
 class_name WindowManager extends Node3D
 
-# Creates windows from the window.tscn template and owns the stack order.
-# List position IS the z-order: the last element is frontmost and is the focused
-# window, so every reorder is a list move followed by _recalculate_z_order().
+# Creates windows from the window.tscn template and owns their placement. Each
+# open window occupies one of three persistent tangent slots on an arc; focus is
+# tracked separately from placement and changes only input routing, MRU history,
+# and header styling. The manager is the sole writer of window transforms.
 
 @export_group("References")
 @export var window: PackedScene
 @export var keyboard: PackedScene
 
 ## The three persistent tangent slots. LEFT/RIGHT sit at -/+ slot_angle from the
-## CENTRE slot on the arc. Introduced now for the geometry helpers; live slot
-## placement is switched on in a later step.
+## CENTRE slot on the arc. Array-indexed as slots[Slot], so the numeric order
+## LEFT, CENTRE, RIGHT is load-bearing; fill/fallback order is chosen explicitly.
 enum Slot { LEFT, CENTRE, RIGHT }
 
 @export_group("Layout")
@@ -29,31 +30,42 @@ enum Slot { LEFT, CENTRE, RIGHT }
 @export var min_height := 0.2
 @export var max_height := 2.5
 
-# Every open window lives in exactly one slot or the stash. The permutation-safe
-# width cap scans this set; slot/stash/focus lifecycle wiring is switched on in a
-# later step, so live placement still runs through windows_list for now.
+# Explicit lifetime/placement/focus state. Invariants: every open window sits in
+# exactly one slot or once in stashed_queue; focused_window is open and slotted
+# (or null when no slot is occupied); focus_history holds each open window once,
+# most-recent first. In Phase 0 the stash and solo state stay empty.
 var open_windows: Array[SWindow] = []
+var slots: Array[SWindow] = [null, null, null]
+var stashed_queue: Array[SWindow] = []
+var focused_window: SWindow = null
+var focus_history: Array[SWindow] = [] # index 0 is most recent
+var soloed_window: SWindow = null
 
-var windows_list: Array[SWindow] = []
-var _focused: SWindow = null
 
+## Opens a window showing `content` in the first empty slot (CENTRE, then RIGHT,
+## then LEFT), sizes it to the layout default, and focuses it. Returns null and
+## warns without mutating state when all three slots are occupied.
+func create_window(content: PackedScene = null) -> SWindow:
+	var slot := _first_empty_slot()
+	if slot == -1:
+		push_warning("All three slots are occupied; ignoring the window request.")
+		return null
 
-## Spawns a window at `pos` showing `content`, focused and frontmost.
-func create_window(pos: Vector3 = Vector3.ZERO, content: PackedScene = null) -> SWindow:
 	var win: SWindow = window.instantiate()
 	win.manager = self
-	win.position = pos
-	add_child(win)
-	windows_list.append(win)
-
 	win.on_closed.connect(func(): _on_window_closed(win))
-	win.on_focused.connect(_on_window_focused)
+	win.on_focused.connect(focus)
 
-	# Focusing also assigns the top z-order, so a new window needs nothing else
-	_on_window_focused(win)
+	$WindowLayer.add_child(win)
+	open_windows.append(win)
+	_assign_slot(win, slot)
 
+	# Install content before the initial focus so the content scene receives its
+	# first on_window_focus_changed callback.
 	if content:
 		win.set_content(content)
+	win.resize(Vector2(default_width(), default_height))
+	focus(win)
 
 	return win
 
@@ -75,63 +87,46 @@ func _on_key_pressed(event: InputEventKey) -> void:
 	# The only route virtual keys take. The keyboard emits this signal rather than
 	# injecting into the Input singleton, so nothing else in the tree ever sees
 	# them -- typing cannot drive the simulator's WASD locomotion.
-	if not _focused:
+	if not focused_window:
 		return
-	_focused.send_input(event)
+	focused_window.send_input(event)
 
 
-## Closes `win`. Ignored when it is not in the stack.
+## Closes `win`. Ignored when it is not open.
 func destroy_window(win: SWindow) -> void:
-	if win in windows_list:
+	if win in open_windows:
 		win.close()
 
 
-## Brings `win` to the front of the stack. Ignored when it is not in the stack.
-func bring_to_front(win: SWindow) -> void:
-	if win not in windows_list:
-		return
+# --- Slot helpers ----------------------------------------------------------
+# The single path that mutates slot occupancy and slot transforms. None of them
+# reads or writes content_size, so later stash/reorder phases reuse them without
+# exposing those features here.
 
-	windows_list.erase(win)
-	windows_list.append(win)
-	_recalculate_z_order()
-
-
-## Sends `win` to the back of the stack. Ignored when it is not in the stack.
-func send_to_back(win: SWindow) -> void:
-	if win not in windows_list:
-		return
-
-	windows_list.erase(win)
-	windows_list.insert(0, win)
-	_recalculate_z_order()
+## The slot `win` occupies, or -1 when it is not slotted (e.g. stashed).
+func _slot_of(win: SWindow) -> int:
+	return slots.find(win)
 
 
-## Moves `win` one level forward. Ignored when it is not in the stack or is
-## already frontmost.
-func move_forward(win: SWindow) -> void:
-	if win not in windows_list:
-		return
-
-	var index = windows_list.find(win)
-	if index < windows_list.size() - 1:
-		var other = windows_list[index + 1]
-		windows_list[index] = other
-		windows_list[index + 1] = win
-		_recalculate_z_order()
+## Puts `win` in `slot` and applies that slot's transform. Placement only.
+func _assign_slot(win: SWindow, slot: Slot) -> void:
+	slots[slot] = win
+	win.transform = slot_transform(slot)
 
 
-## Moves `win` one level backward. Ignored when it is not in the stack or is
-## already backmost.
-func move_backward(win: Node3D) -> void:
-	if win not in windows_list:
-		return
+## Empties whichever slot `win` occupies. No-op when it is not slotted.
+func _clear_slot(win: SWindow) -> void:
+	var i := slots.find(win)
+	if i != -1:
+		slots[i] = null
 
-	var index = windows_list.find(win)
-	if index > 0:
-		var other = windows_list[index - 1]
-		windows_list[index] = other
-		windows_list[index - 1] = win
-		_recalculate_z_order()
+
+## First empty slot in fill order (CENTRE, RIGHT, LEFT), or -1 when all full.
+func _first_empty_slot() -> int:
+	for slot in [Slot.CENTRE, Slot.RIGHT, Slot.LEFT]:
+		if slots[slot] == null:
+			return slot
+	return -1
 
 
 ## Clamps `desired` to the size policy for `win`. The single gateway every
@@ -242,60 +237,79 @@ func validate_tunables() -> void:
 		push_warning("Numeric minimum width exceeds the default width.")
 
 
-## Get the currently focused (frontmost) window
+## The currently focused window, or null when no slot is occupied. Compatibility
+## accessor; focused_window is the field of record.
 func get_focused_window() -> SWindow:
-	return _focused
+	return focused_window
 
 
-## Reassigns every window's z-order from its list position and updates the
-## focused-window highlight to match.
-func _recalculate_z_order() -> void:
-	var top_index = windows_list.size() - 1
-	for i in windows_list.size():
-		var win = windows_list[i] as SWindow
-		if is_instance_valid(win):
-			win.z_order = i
-			win.apply_z_order()
-			win.set_focused_visual(i == top_index)
-
-
-## Drops a closed window from the stack and promotes the next frontmost one.
-func _on_window_closed(win: Node3D) -> void:
-	windows_list.erase(win)
-	if win == _focused:
-		_focused = null
-	_recalculate_z_order()
-	# promote the new frontmost window so input focus matches the visual state
-	if not _focused and not windows_list.is_empty():
-		_on_window_focused(windows_list[-1])
-
-
-## Focuses `win`, bringing it to the front and routing input to it. No-op when
-## it is already the focused window.
-func _on_window_focused(win: SWindow) -> void:
-	# Idempotent so re-pressing the focused window cannot reshuffle the stack
-	# mid-gesture, which is what used to knock depth off the Z_STEP grid
-	if win == _focused:
+## Focuses `win`: routes keyboard/gamepad input to it, moves it to the front of
+## the MRU history, and updates header styling. It changes no slot, transform, or
+## open-list order, and never touches content_size. Idempotent, and a no-op for a
+## window that is not open, not slotted, or suspended behind a solo presentation.
+func focus(win: SWindow) -> void:
+	if not is_instance_valid(win) or win not in open_windows:
 		return
+	if _slot_of(win) == -1:
+		return # a stashed window cannot be focused
+	if soloed_window != null and win != soloed_window:
+		return # suspended behind a solo presentation
+	if win == focused_window:
+		return # idempotent; must not duplicate MRU history
 
-	if _focused:
-		_focused.set_input_enabled(false)
+	if focused_window and is_instance_valid(focused_window):
+		focused_window.set_input_enabled(false)
 
-	bring_to_front(win)
+	focus_history.erase(win)
+	focus_history.push_front(win)
+	focused_window = win
 	win.set_input_enabled(true)
-	_focused = win
+	_update_focus_visuals()
+
+
+## Dims every window's header except the focused one's.
+func _update_focus_visuals() -> void:
+	for win in open_windows:
+		if is_instance_valid(win):
+			win.set_focused_visual(win == focused_window)
+
+
+## Drops a closed window from all state and, if it was focused, promotes the most
+## recent surviving slotted window. Survivors are never moved or resized, so a
+## sparse slot layout is left as-is.
+func _on_window_closed(win: SWindow) -> void:
+	_clear_slot(win)
+	open_windows.erase(win)
+	focus_history.erase(win)
+	if win == focused_window:
+		focused_window = null
+		_focus_after_close()
+	_update_focus_visuals()
+
+
+## After the focused window closes, focus the most recent surviving slotted
+## window; failing that, the first occupied slot (CENTRE, RIGHT, LEFT). Leaves
+## focus null when no window remains.
+func _focus_after_close() -> void:
+	for win in focus_history:
+		if is_instance_valid(win) and _slot_of(win) != -1:
+			focus(win)
+			return
+	for slot in [Slot.CENTRE, Slot.RIGHT, Slot.LEFT]:
+		var win: SWindow = slots[slot]
+		if win != null and is_instance_valid(win):
+			focus(win)
+			return
 
 
 func _ready() -> void:
 	# Check the Layout tunables before any geometry depends on them.
 	validate_tunables()
 
-	# TEMP: hardcoded startup windows, pending a real session/launcher flow
-	# Browse-friendly size for the application list.
-	create_window(Vector3(-0.3, 1.5, -2.0),
-			load("res://project/launch_service/application_menu.tscn")).resize(Vector2(2.4, 1.4))
-	# TODO: Make terminal_ui's fixed-size children fill the viewport and let its
-	# output expand vertically before choosing a new terminal startup size.
-	create_window(Vector3(0.3, 1.5, -2.0), load("res://project/shell/terminal_ui.tscn"))
-	
+	# TEMP: hardcoded startup windows, pending a real session/launcher flow.
+	# The menu takes CENTRE; the terminal takes RIGHT and, opening last, is
+	# focused. Both open at the layout default size.
+	create_window(load("res://project/launch_service/application_menu.tscn"))
+	create_window(load("res://project/shell/terminal_ui.tscn"))
+
 	create_keyboard()

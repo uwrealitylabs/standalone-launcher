@@ -42,9 +42,7 @@ func _initialize() -> void:
 	_check_border_tiles(win)
 	_check_thickness(win, "default size")
 	_check_pointer_event_drives_resize(win)
-	# Leaves the window at MIN_CONTENT_SIZE, which the check below relies on.
 	_check_thickness_shrinks_with_window(win)
-	await _check_handles_stay_behind_the_next_window(win)
 
 	_report.finish(self)
 
@@ -58,8 +56,9 @@ func _check_mask_matches_pointers() -> void:
 			"layer %d vs mask %d" % [SWindow.HANDLE_COLLISION_LAYER, POINTER_MASK])
 
 
-# Depth budget straight from the constants: forward of the window's own screen,
-# and clear of every collider belonging to the window one z-order in front.
+# Depth budget straight from the constants: the handles sit forward of the
+# window's own screen without sinking into it. Windows occupy separate slots on
+# the arc, so there is no stacked neighbour to clear.
 func _check_depth_budget(win: SWindow) -> void:
 	_report.section("depth budget")
 	var front := SWindow.HANDLE_Z + SWindow.HANDLE_DEPTH / 2.0
@@ -78,10 +77,6 @@ func _check_depth_budget(win: SWindow) -> void:
 			% [front, screen.y], front > screen.y)
 	_report.check("handle rear %+.3f does not sink into its own screen" % rear,
 			rear > screen.y - EPS)
-	_report.check("handle front %+.3f clears the next window's screen rear %+.3f"
-			% [front, SWindow.Z_STEP + screen.x], front < SWindow.Z_STEP + screen.x)
-	_report.check("handle front %+.3f clears the next window's handle rear %+.3f"
-			% [front, SWindow.Z_STEP + rear], front < SWindow.Z_STEP + rear)
 
 
 ## Rear and front z of `part`'s screen collider, in `win`-local space.
@@ -201,59 +196,6 @@ func _check_border_tiles(win: SWindow) -> void:
 			absf(l.end.y - hh) < EPS)
 	_report.check("R reaches the top of the content (%.4f == %.4f)" % [r.end.y, hh],
 			absf(r.end.y - hh) < EPS)
-
-
-## A window's handles reach forward of its own screen, so they must still fall
-## short of the screen belonging to the window one z-order in front of it.
-##
-## Expects `back` to be at MIN_CONTENT_SIZE, so that the fresh default-sized
-## window placed in front of it is the larger of the two.
-func _check_handles_stay_behind_the_next_window(back: SWindow) -> void:
-	_report.section("handles stay behind the next window")
-	var front: SWindow = load(WINDOW_SCENE).instantiate()
-	root.add_child(front)
-	await physics_frame
-
-	back.z_order = 0
-	back.apply_z_order()
-	front.z_order = 1
-	front.apply_z_order()
-	front.global_position.x = back.global_position.x
-	front.global_position.y = back.global_position.y
-	await physics_frame
-	await physics_frame
-
-	_report.check("the front window is one Z_STEP ahead (%.4f)"
-			% (front.global_position.z - back.global_position.z),
-			absf(front.global_position.z - back.global_position.z - SWindow.Z_STEP) < EPS)
-
-	# Only a smaller window behind a larger one puts the back border over the
-	# front screen, which is the arrangement where a bad pick would bite
-	_report.check("the back window is the smaller of the two (%s vs %s)"
-			% [back.content_size, front.content_size],
-			back.content_size.x < front.content_size.x
-			and back.content_size.y < front.content_size.y)
-
-	# Aim where the back window's handles are; the front window's screen covers
-	# the same spot and is nearer, so it must take the ray.
-	for handle_id in ["L", "R", "B", "BL", "BR"]:
-		var behind := _handle(back, handle_id)
-		var hit := _cast_at(behind.global_position)
-		var owner_win := _owning_window(hit)
-		_report.check("ray over the back window's %s handle hits the front window (got %s)"
-				% [handle_id, _describe(hit)], owner_win == front)
-
-	front.free()
-
-
-## The SWindow that `node` belongs to, or null.
-func _owning_window(node: Object) -> SWindow:
-	var walk := node as Node
-	while walk != null:
-		if walk is SWindow:
-			return walk
-		walk = walk.get_parent()
-	return null
 
 
 func _rect(win: SWindow, handle_id: String) -> Rect2:
