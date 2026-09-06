@@ -37,10 +37,16 @@ var _resize_max_width  := MAX_CONTENT_SIZE.x
 
 # Grab bands straddling the content edges, keyed by handle id
 var _resize_handles := {}
-# Unshaded white marks hinting where each handle is, keyed by handle id. Shown
-# while a ray hovers a handle and hidden when it leaves, resize or not. These are
-# pure visuals: no collision, so they never interfere with handle picking.
+# Unshaded white marks hinting where each handle is, keyed by handle id. A mark
+# shows while any ray hovers its handle and hides only when the last one leaves,
+# resize or not. These are pure visuals: no collision, so they never interfere
+# with handle picking.
 var _resize_affordances := {}
+# Which pointers currently hover each handle: handle id -> set of pointer instance
+# ids (0 for a null/synthetic pointer). With two controllers a single flag would
+# let either hand's EXITED hide a mark the other hand is still on, so hovers are
+# counted per pointer and the mark shows while the set is non-empty.
+var _affordance_hovers := {}
 # Nominal length of a mark along its edge, capped to a fraction of that edge so
 # the two bottom corners never overlap and a mark never spans its whole side.
 const AFFORDANCE_LENGTH := 0.12
@@ -351,9 +357,9 @@ func _viewport_resolution(size: Vector2, ppu: float) -> Vector2:
 func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> void:
 	match event.event_type:
 		XRToolsPointerEvent.Type.ENTERED:
-			_set_affordance_visible(handle_id, true)
+			_set_handle_hovered(handle_id, event.pointer, true)
 		XRToolsPointerEvent.Type.EXITED:
-			_set_affordance_visible(handle_id, false)
+			_set_handle_hovered(handle_id, event.pointer, false)
 		XRToolsPointerEvent.Type.PRESSED:
 			start_resize(handle_id, event)
 		XRToolsPointerEvent.Type.MOVED:
@@ -455,6 +461,7 @@ func _build_resize_affordances() -> void:
 			group.add_child(_make_affordance_segment(mat))
 		root.add_child(group)
 		_resize_affordances[handle_id] = group
+		_affordance_hovers[handle_id] = {}
 
 	_layout_resize_affordances()
 
@@ -511,12 +518,25 @@ func _place_segment(seg: MeshInstance3D, pos: Vector3, size: Vector3) -> void:
 	(seg.mesh as BoxMesh).size = size
 
 
-## Shows or hides the affordance marks for `handle_id`. Unknown ids are ignored,
-## so a release with no active handle is harmless.
-func _set_affordance_visible(handle_id: String, is_visible: bool) -> void:
+## Records whether `pointer` is hovering `handle_id`, then shows the mark while
+## any pointer still hovers it. Counting per pointer keeps one hand's exit from
+## hiding a mark the other hand is on -- e.g. when a resize moves the edge out
+## from under the non-resizing ray. Unknown handle ids are ignored, so a release
+## with no active handle is harmless.
+func _set_handle_hovered(handle_id: String, pointer: Node3D, hovered: bool) -> void:
+	var hovers: Dictionary = _affordance_hovers.get(handle_id)
+	if hovers == null:
+		return
+	# Key by instance id, not the node itself, so a freed pointer never lingers as
+	# a live reference. 0 stands in for a null/synthetic pointer.
+	var key := pointer.get_instance_id() if is_instance_valid(pointer) else 0
+	if hovered:
+		hovers[key] = true
+	else:
+		hovers.erase(key)
 	var group := _resize_affordances.get(handle_id) as Node3D
 	if group:
-		group.visible = is_visible
+		group.visible = not hovers.is_empty()
 
 
 ## Closes the window: emits on_closed and frees the node.
