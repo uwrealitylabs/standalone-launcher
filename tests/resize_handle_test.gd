@@ -37,11 +37,13 @@ func _initialize() -> void:
 
 	_check_mask_matches_pointers()
 	_check_depth_budget(win)
+	_check_resize_plane_is_window_surface(win)
 	_check_handles_are_pickable(win)
 	_check_content_still_pickable(win)
 	_check_border_tiles(win)
 	_check_thickness(win, "default size")
 	_check_pointer_event_drives_resize(win)
+	_check_resize_survives_window_move(win)
 	_check_thickness_shrinks_with_window(win)
 	_check_affordance_visibility(win)
 
@@ -78,6 +80,22 @@ func _check_depth_budget(win: SWindow) -> void:
 			% [front, screen.y], front > screen.y)
 	_report.check("handle rear %+.3f does not sink into its own screen" % rear,
 			rear > screen.y - EPS)
+
+
+## The handle collider extends in front for picking, but resize motion is
+## projected onto the visible window surface rather than the collider's centre.
+func _check_resize_plane_is_window_surface(win: SWindow) -> void:
+	_report.section("resize plane")
+	var plane := win._live_resize_plane()
+	var xf := win.global_transform.orthonormalized()
+	var handle_centre := xf.origin + xf.basis.z * SWindow.HANDLE_Z
+
+	_report.check("the resize plane passes through the visible window surface",
+			absf(plane.distance_to(xf.origin)) < EPS)
+	_report.check("the resize plane faces along the window normal",
+			plane.normal.is_equal_approx(xf.basis.z))
+	_report.check("the handle collider centre remains in front of the resize plane",
+			absf(plane.distance_to(handle_centre) - SWindow.HANDLE_Z) < EPS)
 
 
 ## Rear and front z of `part`'s screen collider, in `win`-local space.
@@ -147,6 +165,40 @@ func _check_pointer_event_drives_resize(win: SWindow) -> void:
 
 	_emit(right, XRToolsPointerEvent.Type.RELEASED, grab + Vector3(0.3, 0, 0))
 	_report.check("RELEASED on the R handle ends the resize", not win._resizing)
+
+
+## The gesture is measured in the window's own frame, so moving the window
+## mid-resize -- as locomotion does, sliding the whole arc via WindowFollow -- must
+## not change the size on its own. Grab, translate the window (and the pointer with
+## it, as the rig carries both), and confirm the size holds; then a genuine drag on
+## top of the move still resizes correctly.
+func _check_resize_survives_window_move(win: SWindow) -> void:
+	_report.section("a mid-gesture window move does not corrupt the resize")
+	var before: Vector2 = win.content_size
+	var start_pos: Vector3 = win.global_position
+	var right := _handle(win, "R")
+	var grab := right.global_position
+	_emit(right, XRToolsPointerEvent.Type.PRESSED, grab)
+
+	# Locomotion slides the window; the hand rides the same rig, so the pointer
+	# shifts by the identical world vector. Net pointer-vs-window motion is zero.
+	var shift := Vector3(2.0, 0.5, 0)
+	win.global_position += shift
+	_emit(right, XRToolsPointerEvent.Type.MOVED, grab + shift)
+	_report.check("a pure window move leaves the size unchanged (dx %.4f)"
+			% (win.content_size.x - before.x),
+			win.content_size.is_equal_approx(before))
+
+	# A real 0.3 m drag on top of the moved window still widens it by 0.6 m.
+	_emit(right, XRToolsPointerEvent.Type.MOVED, grab + shift + Vector3(0.3, 0, 0))
+	_report.check("a drag after the move still widens by 0.6 (got %.4f)"
+			% (win.content_size.x - before.x),
+			absf(win.content_size.x - before.x - 0.6) < EPS)
+
+	_emit(right, XRToolsPointerEvent.Type.RELEASED, grab + shift + Vector3(0.3, 0, 0))
+	# Leave the window as the following tests expect it: original pose and size.
+	win.global_position = start_pos
+	win.resize(before)
 
 
 ## The affordance marks are driven purely by hover: an ENTERED shows the hovered
@@ -308,4 +360,3 @@ func _describe(node: Object) -> String:
 	if node == null:
 		return "nothing"
 	return (node as Node).get_path()
-

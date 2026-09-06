@@ -20,20 +20,19 @@ signal on_focused(win: SWindow)
 var manager: WindowManager = null
 
 # Resize window variables
-var _resizing          := false
-var _resize_handle     := ""
-# The grab point and the window's frame are frozen at gesture start so a resize
-# is rotation-safe and fixed-centre: the origin never moves, both edges grow
-# symmetrically about it, and pointer displacement is projected onto the frozen
-# world axes rather than assuming world XY.
-var _resize_start_hit  := Vector3.ZERO
-var _resize_start_size := Vector2.ZERO
-var _resize_x_axis     := Vector3.RIGHT
-var _resize_y_axis     := Vector3.UP
-var _resize_plane      := Plane()
+var _resizing           := false
+var _resize_handle      := ""
+# The grab point is stored in the window's OWN frame, and every mid-gesture hit is
+# converted back into that frame, so displacement is measured relative to the window
+# rather than to fixed world space. This keeps the resize fixed-centre and
+# rotation-safe (the origin never moves; both edges grow symmetrically about it)
+# and, crucially, immune to the window being moved mid-gesture -- e.g. by
+# locomotion, which slides the whole arc via WindowFollow while a resize is live.
+var _resize_start_local := Vector3.ZERO
+var _resize_start_size  := Vector2.ZERO
 # The permutation-safe width cap, frozen at gesture start. The manager reads it
 # through clamp_content_size while _resizing so mid-gesture frames need no rescan.
-var _resize_max_width  := MAX_CONTENT_SIZE.x
+var _resize_max_width   := MAX_CONTENT_SIZE.x
 
 # Grab bands straddling the content edges, keyed by handle id
 var _resize_handles := {}
@@ -183,35 +182,36 @@ func _process(delta: float) -> void:
 	if _resizing:
 		_tick_resolution(delta)
 
+## The window's resize plane at its CURRENT pose: the visible surface through the
+## window origin, facing along its normal. Rebuilt each frame so a window moved
+## mid-gesture (e.g. by locomotion) is measured against where it is now, not where
+## it was grabbed.
+func _live_resize_plane() -> Plane:
+	var xf := global_transform.orthonormalized()
+	return Plane(xf.basis.z, xf.origin)
+
+
 ## Starts a resize on `handle` ("L", "R", "B", "BL" or "BR") from the grab
 ## described by `event`. No-op when the pointer ray misses the window's plane.
 func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
-	# Focus first, then freeze the whole gesture frame. The plane faces along the
-	# window normal and passes through the handle collider's depth centre (not the
-	# window origin), so the grab lands where the handle actually is. Resolving
-	# the baseline against this same frozen plane keeps it consistent with the
-	# MOVED frames that follow.
+	# Focus first, then anchor the grab on the visible window surface. The hit is
+	# stored in the window's own frame (to_local) so later frames can re-measure
+	# against the live window.
 	focus()
-	var xf := global_transform.orthonormalized()
-	_resize_plane = Plane(xf.basis.z, xf.origin + xf.basis.z * HANDLE_Z)
-	var hit = _resolve_pointer_hit(event, _resize_plane)
+	var hit = _resolve_pointer_hit(event, _live_resize_plane())
 	if hit == null:
 		return
-	# Take exclusive resize ownership before freezing any gesture state; a refusal
+	# Take exclusive resize ownership before storing any gesture state; a refusal
 	# (another window is already resizing) leaves this window untouched.
 	if manager and not manager.acquire_resize(self):
 		return
-	_resizing          = true
-	_resize_handle     = handle
-	_resize_start_hit  = hit
-	_resize_start_size = content_size
+	_resizing           = true
+	_resize_handle      = handle
+	_resize_start_local = to_local(hit)
+	_resize_start_size  = content_size
 	# Freeze the width cap for the whole gesture: exclusive ownership means no other
 	# window's width changes, so this cap stays valid until release.
-	_resize_max_width  = manager.max_content_width_for(self) if manager else MAX_CONTENT_SIZE.x
-	# Cache the world axes so displacement is measured in the window's own frame
-	# regardless of yaw. The origin is never cached: a resize never moves it.
-	_resize_x_axis     = xf.basis.x
-	_resize_y_axis     = xf.basis.y
+	_resize_max_width   = manager.max_content_width_for(self) if manager else MAX_CONTENT_SIZE.x
 	set_process(true)
 
 
@@ -220,14 +220,15 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 func update_resize(hit_world: Vector3) -> void:
 	if not _resizing:
 		return
-	# Project the displacement onto the frozen world axes, then apply the
-	# fixed-centre rule: the grabbed edge follows the pointer while the opposite
-	# edge moves by the same amount, so the dimension changes by twice the
-	# projected displacement. All requests go through resize() so the managed
-	# clamp cannot be bypassed.
-	var d := hit_world - _resize_start_hit
-	var dx := d.dot(_resize_x_axis)
-	var dy := d.dot(_resize_y_axis)
+	# Convert the live hit into the window's own frame and take the displacement from
+	# the grab there. Because both points are window-local, any rigid motion of the
+	# window since the grab (locomotion sliding the arc) cancels out. Then apply the
+	# fixed-centre rule: the grabbed edge follows the pointer while the opposite edge
+	# moves by the same amount, so the dimension changes by twice the displacement.
+	# All requests go through resize() so the managed clamp cannot be bypassed.
+	var d := to_local(hit_world) - _resize_start_local
+	var dx := d.x
+	var dy := d.y
 	var dw := 0.0
 	var dh := 0.0
 	match _resize_handle:
@@ -363,7 +364,7 @@ func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> 
 		XRToolsPointerEvent.Type.PRESSED:
 			start_resize(handle_id, event)
 		XRToolsPointerEvent.Type.MOVED:
-			var hit = _resolve_pointer_hit(event, _resize_plane)
+			var hit = _resolve_pointer_hit(event, _live_resize_plane())
 			if hit != null:
 				update_resize(hit)
 		XRToolsPointerEvent.Type.RELEASED:
