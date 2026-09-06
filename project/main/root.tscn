@@ -148,7 +148,7 @@ update_scale = false
 [node name="WindowManager" parent="." instance=ExtResource("8_41lny")]
 
 [node name="CompositorScreen" parent="WindowManager" instance=ExtResource("9_cmpsc")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.6, 7.5, -2)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.6, 4.5, -2)
 
 [editable path="XROrigin3D"]
 [editable path="XROrigin3D/XRController3D_left/LeftHand"]
