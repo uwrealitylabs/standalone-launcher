@@ -43,6 +43,7 @@ func _initialize() -> void:
 	_check_thickness(win, "default size")
 	_check_pointer_event_drives_resize(win)
 	_check_thickness_shrinks_with_window(win)
+	_check_affordance_visibility(win)
 
 	_report.finish(self)
 
@@ -146,6 +147,49 @@ func _check_pointer_event_drives_resize(win: SWindow) -> void:
 
 	_emit(right, XRToolsPointerEvent.Type.RELEASED, grab + Vector3(0.3, 0, 0))
 	_report.check("RELEASED on the R handle ends the resize", not win._resizing)
+
+
+## The affordance marks are driven purely by hover: an ENTERED shows the hovered
+## handle's mark and only an EXITED hides it. A resize does not change that, so
+## the mark stays up through the gesture and remains after release while the ray
+## is still on the handle. There is no top mark, matching the missing top handle.
+func _check_affordance_visibility(win: SWindow) -> void:
+	_report.section("resize affordances")
+	_report.check("there is no top affordance",
+			_affordance(win, "T") == null and _affordance(win, "TOP") == null)
+
+	var right := _handle(win, "R")
+	var mark := _affordance(win, "R")
+	if mark == null:
+		_report.check("the R affordance exists", false)
+		return
+	_report.check("affordances start hidden", not mark.visible)
+
+	_emit(right, XRToolsPointerEvent.Type.ENTERED, right.global_position)
+	_report.check("entering the R handle shows its mark", mark.visible)
+
+	# The mark stays up across the whole gesture, not just the hover before it.
+	var grab := right.global_position
+	_emit(right, XRToolsPointerEvent.Type.PRESSED, grab)
+	_emit(right, XRToolsPointerEvent.Type.MOVED, grab + Vector3(0.1, 0, 0))
+	_report.check("the mark stays shown during the resize", mark.visible)
+
+	# The ray is still on the handle after release, so the mark stays shown; no
+	# exit-and-re-enter is needed to bring it back.
+	_emit(right, XRToolsPointerEvent.Type.RELEASED, grab + Vector3(0.1, 0, 0))
+	_report.check("the mark stays shown after the resize ends", mark.visible)
+
+	# Only leaving the handle hides it.
+	_emit(right, XRToolsPointerEvent.Type.EXITED, right.global_position)
+	_report.check("exiting the handle hides the mark", not mark.visible)
+
+
+## The affordance group `win` shows for `handle_id`, or null if it has none.
+func _affordance(win: SWindow, handle_id: String) -> Node3D:
+	var root := win.get_node_or_null("ResizeAffordances")
+	if root == null:
+		return null
+	return root.get_node_or_null("Affordance" + handle_id) as Node3D
 
 
 ## Shrinks the window to MIN_CONTENT_SIZE and rechecks the bands, which must
