@@ -19,11 +19,11 @@ enum Slot { LEFT, CENTRE, RIGHT }
 ## slot lands near the legacy (0, 1.5, -2) window pose at the default radius.
 @export var reference_point := Vector3(0.0, 1.5, 0.0)
 ## Arc radius R: distance from reference_point to every slot's content centre.
-@export var radius := 2.0
+@export var radius := 3.0
 ## Angular separation theta between adjacent slots (stored in radians).
 @export_range(1.0, 89.0, 0.1, "radians_as_degrees") var slot_angle := deg_to_rad(45.0)
 ## Empty gutter g kept between adjacent windows (stored in radians).
-@export_range(0.0, 89.0, 0.1, "radians_as_degrees") var gutter_angle := deg_to_rad(5.0)
+@export_range(0.0, 89.0, 0.1, "radians_as_degrees") var gutter_angle := deg_to_rad(2.0)
 ## Default window angular half-width beta_default (stored in radians).
 @export_range(1.0, 89.0, 0.1, "radians_as_degrees") var default_half_width := deg_to_rad(18.0)
 @export var default_height := 0.9
