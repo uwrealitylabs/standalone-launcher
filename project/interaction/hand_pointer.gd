@@ -14,6 +14,10 @@ signal pointer_exited(target: Node)
 @export var debounce_time: float = 0.15
 
 var _current_target: Node = null
+# Last world-space point the ray hit on _current_target. An EXITED event fires
+# after the ray has already left, so it carries this cached point rather than a
+# stale or missing collision this frame.
+var _last_hover_pos: Vector3 = Vector3.ZERO
 # Target grabbed at pinch start; all gesture events go here until release.
 # Gesture positions are ray intersections with the target's LIVE facing
 # plane (see _locked_plane_hit) — never collider surface points — so
@@ -103,13 +107,22 @@ func _process_hit_test():
 		return
 	if _raycast.is_colliding():
 		var collider = _raycast.get_collider()
+		var hit_point: Vector3 = _raycast.get_collision_point()
 		if collider != _current_target:
+			# Leave the old target before entering the new one so a window owning
+			# both sees a clean hand-off. Deliver the XRToolsPointerEvent the
+			# colliders listen for alongside the public hover signals.
 			if _current_target:
+				_send_xr_event(XRToolsPointerEvent.Type.EXITED, _current_target, _last_hover_pos)
 				pointer_exited.emit(_current_target)
 			_current_target = collider
+			_send_xr_event(XRToolsPointerEvent.Type.ENTERED, _current_target, hit_point)
 			pointer_entered.emit(_current_target)
+		# Cache the live hit so a later EXITED has a meaningful position.
+		_last_hover_pos = hit_point
 	else:
 		if _current_target:
+			_send_xr_event(XRToolsPointerEvent.Type.EXITED, _current_target, _last_hover_pos)
 			pointer_exited.emit(_current_target)
 			_current_target = null
 

@@ -37,6 +37,17 @@ var _resize_max_width  := MAX_CONTENT_SIZE.x
 
 # Grab bands straddling the content edges, keyed by handle id
 var _resize_handles := {}
+# Unshaded white marks hinting where each handle is, keyed by handle id. Shown
+# while a ray hovers a handle and hidden when it leaves, resize or not. These are
+# pure visuals: no collision, so they never interfere with handle picking.
+var _resize_affordances := {}
+# Nominal length of a mark along its edge, capped to a fraction of that edge so
+# the two bottom corners never overlap and a mark never spans its whole side.
+const AFFORDANCE_LENGTH := 0.12
+const AFFORDANCE_THICKNESS := 0.006
+# In front of the handle bodies (viewer on +z) so the marks never Z-fight the
+# screen or the collision boxes.
+const AFFORDANCE_Z := HANDLE_Z + HANDLE_DEPTH / 2.0 + 0.001
 # Thickness tracks the window so a small one is not mostly handle, and stops
 # growing once the band is comfortably wide enough to hit. Staying under half
 # keeps the spans in _layout_resize_handles positive at MIN_CONTENT_SIZE.
@@ -97,6 +108,7 @@ func _ready() -> void:
 		header_3d.enabled = true
 		content_3d.set_process_input(false)
 	_build_resize_handles()
+	_build_resize_affordances()
 	_apply_size(content_size)
 
 
@@ -232,6 +244,8 @@ func update_resize(hit_world: Vector3) -> void:
 ## Ends the resize and settles the render resolutions at the final size.
 func stop_resize() -> void:
 	_resizing      = false
+	# The mark is driven purely by hover, so it is left as-is here: still shown if
+	# the ray is on the handle, and cleared later by the handle's own EXITED.
 	_resize_handle = ""
 	if manager:
 		manager.release_resize(self)
@@ -269,6 +283,7 @@ func _apply_size(new_size: Vector2, live: bool = false) -> void:
 	# Header sits on top of the content; both are centred on the window
 	header_3d.position.y = (content_size.y + HEADER_HEIGHT) / 2.0
 	_layout_resize_handles()
+	_layout_resize_affordances()
 
 	if live:
 		_res_pending = true
@@ -335,6 +350,10 @@ func _viewport_resolution(size: Vector2, ppu: float) -> Vector2:
 ## Invoked when a resize handle's pointer event signal is received
 func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> void:
 	match event.event_type:
+		XRToolsPointerEvent.Type.ENTERED:
+			_set_affordance_visible(handle_id, true)
+		XRToolsPointerEvent.Type.EXITED:
+			_set_affordance_visible(handle_id, false)
 		XRToolsPointerEvent.Type.PRESSED:
 			start_resize(handle_id, event)
 		XRToolsPointerEvent.Type.MOVED:
@@ -411,6 +430,93 @@ func _place_handle(handle_id: String, lo: Vector2, hi: Vector2) -> void:
 	body.position = Vector3((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, HANDLE_Z)
 	var col := body.get_child(0) as CollisionShape3D
 	(col.shape as BoxShape3D).size = Vector3(hi.x - lo.x, hi.y - lo.y, HANDLE_DEPTH)
+
+
+## Creates the affordance marks under "ResizeAffordances", one hidden group per
+## handle. Edge handles carry a single segment; the bottom corners carry two arms
+## meeting at the corner. Call once, after the handles exist.
+func _build_resize_affordances() -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color.WHITE
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var root := Node3D.new()
+	root.name = "ResizeAffordances"
+	add_child(root)
+
+	# Edge marks are one segment; each bottom corner is two arms. No top mark:
+	# the header owns that side and it has no handle.
+	var segment_counts := {"L": 1, "R": 1, "B": 1, "BL": 2, "BR": 2}
+	for handle_id in segment_counts:
+		var group := Node3D.new()
+		group.name = "Affordance" + handle_id
+		group.visible = false
+		for _i in segment_counts[handle_id]:
+			group.add_child(_make_affordance_segment(mat))
+		root.add_child(group)
+		_resize_affordances[handle_id] = group
+
+	_layout_resize_affordances()
+
+
+## A thin unshaded box with no collision, used as one affordance segment.
+func _make_affordance_segment(mat: StandardMaterial3D) -> MeshInstance3D:
+	var seg := MeshInstance3D.new()
+	seg.mesh = BoxMesh.new()
+	seg.material_override = mat
+	return seg
+
+
+## Positions the affordance marks over the current content edges, mirroring the
+## handle layout. No-op until the marks are built.
+func _layout_resize_affordances() -> void:
+	if _resize_affordances.is_empty():
+		return
+	var hw := content_size.x / 2.0
+	var hh := content_size.y / 2.0
+	var t := AFFORDANCE_THICKNESS
+	# Cap each mark to a fraction of its edge so the two bottom corners never
+	# overlap and no mark spans a whole side.
+	var len_x := minf(AFFORDANCE_LENGTH, content_size.x * 0.4)
+	var len_y := minf(AFFORDANCE_LENGTH, content_size.y * 0.4)
+
+	# Edge marks: centred on each side, none on top.
+	_place_segment(_resize_affordances["L"].get_child(0),
+			Vector3(-hw, 0.0, AFFORDANCE_Z), Vector3(t, len_y, t))
+	_place_segment(_resize_affordances["R"].get_child(0),
+			Vector3(hw, 0.0, AFFORDANCE_Z), Vector3(t, len_y, t))
+	_place_segment(_resize_affordances["B"].get_child(0),
+			Vector3(0.0, -hh, AFFORDANCE_Z), Vector3(len_x, t, t))
+
+	# Corner marks: a horizontal arm and a vertical arm meeting at each bottom
+	# corner. A signed arm length carries the direction it grows from the corner.
+	_layout_corner("BL", -hw, -hh, len_x, len_y, t)
+	_layout_corner("BR", hw, -hh, -len_x, len_y, t)
+
+
+## Lays out one corner mark: a horizontal arm of signed length `arm_x` and a
+## vertical arm of signed length `arm_y`, both growing from the corner (cx, cy).
+func _layout_corner(handle_id: String, cx: float, cy: float,
+		arm_x: float, arm_y: float, t: float) -> void:
+	var group: Node3D = _resize_affordances[handle_id]
+	_place_segment(group.get_child(0),
+			Vector3(cx + arm_x / 2.0, cy, AFFORDANCE_Z), Vector3(absf(arm_x), t, t))
+	_place_segment(group.get_child(1),
+			Vector3(cx, cy + arm_y / 2.0, AFFORDANCE_Z), Vector3(t, absf(arm_y), t))
+
+
+## Moves and resizes one affordance segment.
+func _place_segment(seg: MeshInstance3D, pos: Vector3, size: Vector3) -> void:
+	seg.position = pos
+	(seg.mesh as BoxMesh).size = size
+
+
+## Shows or hides the affordance marks for `handle_id`. Unknown ids are ignored,
+## so a release with no active handle is harmless.
+func _set_affordance_visible(handle_id: String, is_visible: bool) -> void:
+	var group := _resize_affordances.get(handle_id) as Node3D
+	if group:
+		group.visible = is_visible
 
 
 ## Closes the window: emits on_closed and frees the node.
