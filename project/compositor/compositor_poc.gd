@@ -6,13 +6,13 @@ extends MeshInstance3D
 ## [WaylandCompositor] owns polling and the texture. Splitting process ownership
 ## across the GDScript/C++ boundary is how children get double-reaped or leaked.
 ##
-## Deliberately not an [SWindow]: that class drives an [XRToolsViewport2DIn3D]
-## and a [SubViewport], neither of which a compositor-owned texture fits. Input,
-## resizing, focus and multi-window support are all out of scope.
+## Deliberately not an [SWindow]: that class drives an [XRToolsViewport2DIn3D] and
+## [SubViewport], which a compositor-owned texture doesn't fit. Input, resizing,
+## focus and multi-window support are out of scope.
 ##
-## The node is authored hidden and shows itself only once a real client frame
-## has been bound. A host with no GDExtension — every macOS and x86_64 machine —
-## therefore renders nothing at all, rather than an untextured white quad.
+## Authored hidden, showing itself only once a real client frame is bound, so a
+## host with no GDExtension (every macOS and x86_64 machine) renders nothing rather
+## than an untextured white quad.
 
 ## Default client. Overridable via WRL_COMPOSITOR_CLIENT
 const DEFAULT_CLIENT_COMMAND := "weston-simple-shm"
@@ -61,15 +61,13 @@ func _ready() -> void:
 		_client_command = override
 
 	if not ClassDB.class_exists("WaylandCompositor"):
-		# Expected wherever the extension was not built: it targets Linux arm64
-		# and nothing else, so this is not a misconfiguration. Godot's own red
-		# "No GDExtension library found" log on such hosts is the same expected miss.
+		# Expected off Linux arm64, the only target the extension builds for; not a
+		# misconfiguration. Godot's own "No GDExtension library found" log is the same.
 		print("[compositor_poc] WaylandCompositor unavailable off Linux arm64; "
 				+ "staying hidden.")
 		return
 
-	# Built only on this path. An unsupported host has nothing to shade, and a
-	# material assigned there would just be a white quad waiting to be shown.
+	# Built only here: an unsupported host has nothing to shade.
 	_material = StandardMaterial3D.new()
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
@@ -138,15 +136,14 @@ func _launch_client() -> void:
 			% [_client_command, _client_pid, runtime_dir, socket])
 
 
-## Begins an orderly, frame-driven teardown and returns immediately, leaving
-## processing on so [method _process] can carry it out without blocking the main
-## thread. Idempotent: later calls are ignored. Callers may await
-## [signal shutdown_finished] to learn when it is done.
+## Begins a frame-driven teardown and returns immediately, leaving processing on so
+## [method _process] carries it out without blocking. Idempotent; callers may await
+## [signal shutdown_finished].
 ##
 ## SIGTERM is sent once here; [method _process] escalates to SIGKILL after
-## [constant TERM_GRACE_SECONDS] and reaps. With no live client — off Linux arm64,
-## or after the client already exited — there is nothing to signal, so completion
-## is deferred to the next frame rather than skipped, keeping the signal contract.
+## [constant TERM_GRACE_SECONDS] and reaps. With no live client there is nothing to
+## signal, so completion is deferred a frame rather than skipped, keeping the
+## signal contract.
 func request_shutdown() -> void:
 	if _shutdown_requested:
 		return
@@ -204,10 +201,9 @@ func _finish_shutdown() -> void:
 	shutdown_finished.emit()
 
 
-## Safety net for a teardown that bypassed [method request_shutdown] — the node
-## being freed directly. Unlike the graceful path, [method _exit_tree] gets no
-## further [method _process] callbacks, so there is nothing to drive a grace
-## period; kill the client outright rather than block the main thread waiting.
+## Safety net for a teardown that bypassed [method request_shutdown] (the node
+## freed directly). [method _exit_tree] gets no further [method _process] callbacks
+## to drive a grace period, so the client is killed outright rather than waited on.
 func _exit_tree() -> void:
 	if _client_pid != -1:
 		push_warning("compositor_poc torn down without graceful shutdown; "

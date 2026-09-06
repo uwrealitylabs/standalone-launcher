@@ -14,19 +14,17 @@ signal pointer_exited(target: Node)
 @export var debounce_time: float = 0.15
 
 var _current_target: Node = null
-# Last world-space point the ray hit on _current_target. An EXITED event fires
-# after the ray has already left, so it carries this cached point rather than a
-# stale or missing collision this frame.
+# Last world-space point the ray hit on _current_target. EXITED fires after the
+# ray has already left, so it carries this cached point instead of a missing hit.
 var _last_hover_pos: Vector3 = Vector3.ZERO
 # Target grabbed at pinch start; all gesture events go here until release.
 # Gesture positions are ray intersections with the target's LIVE facing
 # plane (see _locked_plane_hit) — never collider surface points — so
 # tracking continues off-collider and follows z-order changes mid-gesture.
 var _locked_target: Node = null
-# Last valid plane intersection during the active gesture. Select-up is
-# authoritative — it must always deliver RELEASED so a resize or drag can't
-# survive the pinch — but the ray often leaves the plane on the very frame the
-# hand relaxes, so RELEASED falls back to this when the live hit is null.
+# Last valid plane intersection during the active gesture. The ray often leaves
+# the plane on the frame the hand relaxes, so RELEASED falls back to this when the
+# live hit is null (select-up must always deliver RELEASED to end the gesture).
 var _last_gesture_hit: Vector3 = Vector3.ZERO
 var _was_pinching: bool = false
 var _debounce_timer: float = 0.0
@@ -115,8 +113,8 @@ func _process_hit_test():
 		var hit_point: Vector3 = _raycast.get_collision_point()
 		if collider != _current_target:
 			# Leave the old target before entering the new one so a window owning
-			# both sees a clean hand-off. Deliver the XRToolsPointerEvent the
-			# colliders listen for alongside the public hover signals.
+			# both sees a clean hand-off. Colliders listen for the XRToolsPointerEvent
+			# alongside the public hover signals.
 			if _current_target:
 				_send_xr_event(XRToolsPointerEvent.Type.EXITED, _current_target, _last_hover_pos)
 				pointer_exited.emit(_current_target)
@@ -156,9 +154,8 @@ func _process_tap(pinch_value: float):
 			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _locked_target, hit)
 
 	elif not is_pinching and _was_pinching:
-		# Always deliver RELEASED to the grabbed target, even when the ray has
-		# already left its plane this frame, so the receiver can end its gesture on
-		# select-up. Fall back to the last in-gesture hit for a sensible position.
+		# Always deliver RELEASED so the receiver ends its gesture on select-up,
+		# even if the ray already left the plane; fall back to the last valid hit.
 		var hit = _locked_plane_hit()
 		var pos: Vector3 = hit if hit != null else _last_gesture_hit
 		_send_xr_event(XRToolsPointerEvent.Type.RELEASED, _locked_target, pos)

@@ -1,8 +1,7 @@
 class_name SWindow extends Node3D
 
-# The WindowManager owns this window's placement: it parents the window under the
-# identity WindowLayer and writes its local transform from the assigned slot. The
-# window never writes its own position; a resize keeps the content centre fixed.
+# WindowManager owns placement, writing this window's transform from its assigned
+# slot; the window never writes its own position. A resize keeps the centre fixed.
 
 @export_group("Content")
 @export var content: PackedScene
@@ -22,29 +21,24 @@ var manager: WindowManager = null
 # Resize window variables
 var _resizing           := false
 var _resize_handle      := ""
-# The grab point is stored in the window's OWN frame, and every mid-gesture hit is
-# converted back into that frame, so displacement is measured relative to the window
-# rather than to fixed world space. This keeps the resize fixed-centre and
-# rotation-safe (the origin never moves; both edges grow symmetrically about it)
-# and, crucially, immune to the window being moved mid-gesture -- e.g. by
-# locomotion, which slides the whole arc via WindowFollow while a resize is live.
+# Grab point in the window's OWN frame; mid-gesture hits convert back to it, so
+# displacement is measured relative to the window. Keeps the resize fixed-centre,
+# rotation-safe, and immune to the window moving mid-gesture (e.g. locomotion
+# sliding the whole arc while a resize is live).
 var _resize_start_local := Vector3.ZERO
 var _resize_start_size  := Vector2.ZERO
-# The permutation-safe width cap, frozen at gesture start. The manager reads it
-# through clamp_content_size while _resizing so mid-gesture frames need no rescan.
+# Permutation-safe width cap, frozen at gesture start so mid-gesture frames need
+# no rescan; read through clamp_content_size while _resizing.
 var _resize_max_width   := MAX_CONTENT_SIZE.x
 
 # Grab bands straddling the content edges, keyed by handle id
 var _resize_handles := {}
-# Unshaded white marks hinting where each handle is, keyed by handle id. A mark
-# shows while any ray hovers its handle and hides only when the last one leaves,
-# resize or not. These are pure visuals: no collision, so they never interfere
-# with handle picking.
+# Unshaded white marks hinting each handle, keyed by handle id. Pure visuals (no
+# collision); shown while any ray hovers the handle.
 var _resize_affordances := {}
-# Which pointers currently hover each handle: handle id -> set of pointer instance
-# ids (0 for a null/synthetic pointer). With two controllers a single flag would
-# let either hand's EXITED hide a mark the other hand is still on, so hovers are
-# counted per pointer and the mark shows while the set is non-empty.
+# Which pointers hover each handle: handle id -> set of pointer instance ids (0 for
+# a null/synthetic pointer). Counted per pointer so one hand's EXITED can't hide a
+# mark the other hand is still on.
 var _affordance_hovers := {}
 # Nominal length of a mark along its edge, capped to a fraction of that edge so
 # the two bottom corners never overlap and a mark never spans its whole side.
@@ -53,9 +47,8 @@ const AFFORDANCE_THICKNESS := 0.006
 # In front of the handle bodies (viewer on +z) so the marks never Z-fight the
 # screen or the collision boxes.
 const AFFORDANCE_Z := HANDLE_Z + HANDLE_DEPTH / 2.0 + 0.001
-# Thickness tracks the window so a small one is not mostly handle, and stops
-# growing once the band is comfortably wide enough to hit. Staying under half
-# keeps the spans in _layout_resize_handles positive at MIN_CONTENT_SIZE.
+# Thickness tracks the window (a small one isn't mostly handle) but caps out. The
+# ratio stays under half so _layout_resize_handles spans stay positive at MIN size.
 const HANDLE_THICKNESS_RATIO := 0.15
 const HANDLE_MAX_THICKNESS := 0.12
 # Depth budget in window-local z, viewer on the +z side. A ray reports the
@@ -82,10 +75,10 @@ const MAX_CONTENT_SIZE := Vector2(3.0, 2.5)
 var PIXELS_PER_UNIT := 150.0
 var HEADER_PIXELS_PER_UNIT := 150.0
 
-# Live-resize resolution throttle. Reallocating a render target also relays out
-# the 2D scene inside it, so committing every frame of a drag risks both a hitch
-# and a visible re-wrap. MAX_STRETCH does the real saving by bounding how far the
-# targets may lag the quads; the interval is only a ceiling on commit rate.
+# Live-resize resolution throttle. Reallocating a render target relays out its 2D
+# scene, so committing every drag frame risks a hitch and a visible re-wrap.
+# MAX_STRETCH bounds how far the targets may lag the quads; the interval is only a
+# ceiling on commit rate.
 const MAX_STRETCH := 0.03
 const MIN_COMMIT_INTERVAL := 1.0 / 15.0
 # Content size the current render targets were allocated for
@@ -155,13 +148,12 @@ func focus() -> void:
 func set_input_enabled(enabled: bool) -> void:
 	content_3d.input_keyboard = enabled
 	content_3d.input_gamepad = enabled
-	# The header is gated for keys too, or every window's title bar would keep
-	# taking physical ones no matter which window is being typed into. Its
-	# gamepad flag is left as authored, which is off.
+	# Gate the header's keys too, or every title bar keeps taking physical keys
+	# regardless of focus. Its gamepad flag is left as authored (off).
 	header_3d.input_keyboard = enabled
 
-	# The scene is set after the first focus call, so early on there is nothing
-	# to notify yet -- content_3d reports null until then.
+	# content_3d reports null until the scene is set on first focus; nothing to
+	# notify before then.
 	var scene := content_3d.get_scene_instance()
 	if scene and scene.has_method("on_window_focus_changed"):
 		scene.on_window_focus_changed(enabled)
@@ -194,9 +186,8 @@ func _live_resize_plane() -> Plane:
 ## Starts a resize on `handle` ("L", "R", "B", "BL" or "BR") from the grab
 ## described by `event`. No-op when the pointer ray misses the window's plane.
 func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
-	# Focus first, then anchor the grab on the visible window surface. The hit is
-	# stored in the window's own frame (to_local) so later frames can re-measure
-	# against the live window.
+	# Focus, then anchor the grab in the window's own frame (to_local) so later
+	# frames can re-measure against the live window.
 	focus()
 	var hit = _resolve_pointer_hit(event, _live_resize_plane())
 	if hit == null:
@@ -209,8 +200,8 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	_resize_handle      = handle
 	_resize_start_local = to_local(hit)
 	_resize_start_size  = content_size
-	# Freeze the width cap for the whole gesture: exclusive ownership means no other
-	# window's width changes, so this cap stays valid until release.
+	# Freeze the width cap: exclusive ownership means no other window's width
+	# changes, so it stays valid for the whole gesture.
 	_resize_max_width   = manager.max_content_width_for(self) if manager else MAX_CONTENT_SIZE.x
 	set_process(true)
 
@@ -220,12 +211,10 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 func update_resize(hit_world: Vector3) -> void:
 	if not _resizing:
 		return
-	# Convert the live hit into the window's own frame and take the displacement from
-	# the grab there. Because both points are window-local, any rigid motion of the
-	# window since the grab (locomotion sliding the arc) cancels out. Then apply the
-	# fixed-centre rule: the grabbed edge follows the pointer while the opposite edge
-	# moves by the same amount, so the dimension changes by twice the displacement.
-	# All requests go through resize() so the managed clamp cannot be bypassed.
+	# Displacement from the grab, both points window-local so any rigid motion since
+	# the grab cancels out. Fixed-centre rule: the grabbed edge follows the pointer
+	# and the opposite edge mirrors it, so the dimension changes by twice the
+	# displacement. Route through resize() so the managed clamp can't be bypassed.
 	var d := to_local(hit_world) - _resize_start_local
 	var dx := d.x
 	var dy := d.y
@@ -305,10 +294,8 @@ func _commit_resolution() -> void:
 	var header_size := Vector2(content_size.x, HEADER_HEIGHT)
 	content_3d.viewport_size = _viewport_resolution(content_size, PIXELS_PER_UNIT)
 	header_3d.viewport_size = _viewport_resolution(header_size, HEADER_PIXELS_PER_UNIT)
-	# Resizing a render target clears it, and the addon only re-arms the refill
-	# on its own throttle clock, which runs at an unrelated phase to this one —
-	# leaving the target blank long enough to read as a flash. Re-arm it here,
-	# on exactly the frames that reallocate.
+	# Resizing a render target clears it; the addon's own refill runs on an
+	# unrelated clock, so re-arm the redraw here to avoid a visible blank flash.
 	_request_redraw(content_3d)
 	_request_redraw(header_3d)
 	_res_basis = content_size
@@ -319,9 +306,8 @@ func _commit_resolution() -> void:
 ## Asks `surface` to redraw its viewport once on the coming frame.
 func _request_redraw(surface: XRToolsViewport2DIn3D) -> void:
 	var viewport := surface.get_node("Viewport") as SubViewport
-	# Assign unconditionally: the renderer resets its own copy after drawing and
-	# never writes back here, so skipping the write when the property already
-	# reads UPDATE_ONCE would skip the redraw
+	# Assign unconditionally: the renderer resets its own copy after drawing, so
+	# skipping the write when it already reads UPDATE_ONCE would skip the redraw.
 	viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
@@ -519,11 +505,9 @@ func _place_segment(seg: MeshInstance3D, pos: Vector3, size: Vector3) -> void:
 	(seg.mesh as BoxMesh).size = size
 
 
-## Records whether `pointer` is hovering `handle_id`, then shows the mark while
-## any pointer still hovers it. Counting per pointer keeps one hand's exit from
-## hiding a mark the other hand is on -- e.g. when a resize moves the edge out
-## from under the non-resizing ray. Unknown handle ids are ignored, so a release
-## with no active handle is harmless.
+## Records whether `pointer` hovers `handle_id`, then shows the mark while any
+## pointer still hovers it. Per-pointer counting keeps one hand's exit from hiding
+## a mark the other hand is on. Unknown handle ids are ignored.
 func _set_handle_hovered(handle_id: String, pointer: Node3D, hovered: bool) -> void:
 	var hovers: Dictionary = _affordance_hovers.get(handle_id)
 	if hovers == null:

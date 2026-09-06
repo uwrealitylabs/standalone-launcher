@@ -4,8 +4,8 @@ const COMPOSITOR_SCREEN_PATH := "WindowManager/CompositorScreen"
 
 var xr_interface: XRInterface
 
-## Set once a close request is being handled, so repeated requests (a second
-## close while the graceful teardown is still in flight) are ignored.
+## Set once a close request is being handled, so a second close during the
+## graceful teardown is ignored.
 var _quitting: bool = false
 
 func _ready():
@@ -32,9 +32,9 @@ func _notification(what: int) -> void:
 
 
 ## Runs the compositor's frame-driven shutdown, then quits. Awaiting
-## shutdown_finished keeps rendering alive through the client's grace period
-## instead of blocking on teardown. The screen emits that signal even when it has
-## nothing to stop, so the await never hangs on hosts without the compositor.
+## shutdown_finished keeps rendering alive through the client's grace period rather
+## than blocking on teardown; the screen emits it even with nothing to stop, so the
+## await never hangs on hosts without the compositor.
 func _shutdown_and_quit() -> void:
 	if _quitting:
 		return

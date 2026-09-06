@@ -1,9 +1,9 @@
 class_name WindowManager extends Node3D
 
-# Creates windows from the window.tscn template and owns their placement. Each
-# open window occupies one of three persistent tangent slots on an arc; focus is
-# tracked separately from placement and changes only input routing, MRU history,
-# and header styling. The manager is the sole writer of window transforms.
+# Creates windows from the window.tscn template and owns their placement: each
+# open window occupies one of three persistent tangent slots on an arc, and the
+# manager is the sole writer of window transforms. Focus is tracked separately and
+# changes only input routing, MRU history, and header styling.
 
 @export_group("References")
 @export var window: PackedScene
@@ -89,9 +89,8 @@ func create_keyboard() -> void:
 
 ## Invoked on (virtual) keyboard input
 func _on_key_pressed(event: InputEventKey) -> void:
-	# The only route virtual keys take. The keyboard emits this signal rather than
-	# injecting into the Input singleton, so nothing else in the tree ever sees
-	# them -- typing cannot drive the simulator's WASD locomotion.
+	# The only route virtual keys take: the keyboard emits this signal instead of
+	# injecting into the Input singleton, so typing can't drive simulator locomotion.
 	if not focused_window:
 		return
 	focused_window.send_input(event)
@@ -134,13 +133,11 @@ func _first_empty_slot() -> int:
 	return -1
 
 
-## Clamps `desired` to the size policy for `win`. The single gateway every
-## managed size request passes through, so no caller can bypass the policy.
-## Width is bounded by the permutation-safe angular cap so no size change can push
-## two windows closer than one slot separation; height is bounded by the
-## configured range intersected with the numeric safety limits. During a resize
-## the width cap is the one frozen at gesture start (exclusive ownership keeps it
-## valid); every other call recomputes it for that single atomic request.
+## Clamps `desired` to the size policy for `win`: the single gateway every managed
+## size request passes through. Width is bounded by the permutation-safe angular
+## cap (no size change pushes two windows closer than one slot); height by the
+## configured range intersected with the numeric limits. During a resize the width
+## cap is the one frozen at gesture start; every other call recomputes it.
 func clamp_content_size(win: SWindow, desired: Vector2) -> Vector2:
 	var max_w: float = win._resize_max_width if win._resizing else max_content_width_for(win)
 	var min_h: float = maxf(min_height, win.MIN_CONTENT_SIZE.y)
@@ -208,14 +205,12 @@ func width_of_beta(beta: float) -> float:
 	return 2.0 * radius * tan(beta)
 
 
-## Widest content width `win` may take while every open window remains safe in
-## every slot permutation: beta_i + beta_other + gutter <= theta against the
-## widest OTHER open window, never counting an other narrower than a default one.
-## Scans open_windows so a removal that exposes a new leader is caught; a stashed
-## window still counts because it too must stay safe beside every neighbour.
-## Returns the numeric width limit when the angular bound is looser. The result
-## is intentionally not floored up to the numeric minimum: startup validation
-## guarantees a numeric-minimum window is legal beside a default one.
+## Widest content width `win` may take while every open window stays safe in every
+## slot permutation: beta_i + beta_other + gutter <= theta against the widest OTHER
+## open window, never counting one narrower than a default. Scans open_windows so a
+## removal exposing a new leader is caught (stashed windows count too). Returns the
+## numeric width limit when the angular bound is looser; deliberately not floored to
+## the numeric minimum, which startup validation already guarantees is legal.
 func max_content_width_for(win: SWindow) -> float:
 	var largest_other := default_half_width
 	for other in open_windows:
