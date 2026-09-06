@@ -23,6 +23,11 @@ var _last_hover_pos: Vector3 = Vector3.ZERO
 # plane (see _locked_plane_hit) — never collider surface points — so
 # tracking continues off-collider and follows z-order changes mid-gesture.
 var _locked_target: Node = null
+# Last valid plane intersection during the active gesture. Select-up is
+# authoritative — it must always deliver RELEASED so a resize or drag can't
+# survive the pinch — but the ray often leaves the plane on the very frame the
+# hand relaxes, so RELEASED falls back to this when the live hit is null.
+var _last_gesture_hit: Vector3 = Vector3.ZERO
 var _was_pinching: bool = false
 var _debounce_timer: float = 0.0
 var _raycast: RayCast3D = null
@@ -137,6 +142,7 @@ func _process_tap(pinch_value: float):
 		_locked_target = _current_target
 		var hit = _locked_plane_hit()
 		if hit != null:
+			_last_gesture_hit = hit
 			_send_xr_event(XRToolsPointerEvent.Type.PRESSED, _locked_target, hit)
 			if _debounce_timer <= 0.0 and _locked_target:
 				pointer_activated.emit(_locked_target, hit)
@@ -146,12 +152,16 @@ func _process_tap(pinch_value: float):
 	elif is_pinching and _was_pinching:
 		var hit = _locked_plane_hit()
 		if hit != null:
+			_last_gesture_hit = hit
 			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _locked_target, hit)
 
 	elif not is_pinching and _was_pinching:
+		# Always deliver RELEASED to the grabbed target, even when the ray has
+		# already left its plane this frame, so the receiver can end its gesture on
+		# select-up. Fall back to the last in-gesture hit for a sensible position.
 		var hit = _locked_plane_hit()
-		if hit != null:
-			_send_xr_event(XRToolsPointerEvent.Type.RELEASED, _locked_target, hit)
+		var pos: Vector3 = hit if hit != null else _last_gesture_hit
+		_send_xr_event(XRToolsPointerEvent.Type.RELEASED, _locked_target, pos)
 		_locked_target = null
 
 	_was_pinching = is_pinching
