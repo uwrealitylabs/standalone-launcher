@@ -99,6 +99,27 @@ func _check_hover_routing() -> void:
 	_report.check("leaving all colliders exits B once", _events == ["B:exit"], str(_events))
 	_report.check("the pointer holds no target after leaving", hp._current_target == null)
 
+	# Select-up is authoritative: releasing the pinch must deliver RELEASED to the
+	# grabbed target even when the ray has already swung off its plane, so a resize
+	# can't survive the release. Grab A, then aim the ray parallel to A's plane so
+	# the live hit is null, and drop the pinch.
+	_aim(ray, Vector3(-1, 0, 0))
+	hp._process_hit_test()
+	_events.clear()
+	hp._process_tap(1.0)
+	_report.check("pinch on A grabs it and sends PRESSED", _events == ["A:press"], str(_events))
+	# Turn the ray 90 deg about Y so its -Z runs parallel to A's +Z-facing plane;
+	# _locked_plane_hit then returns null for the release frame.
+	ray.global_rotation = Vector3(0, PI / 2.0, 0)
+	ray.force_raycast_update()
+	_report.check("the ray now misses A's plane", hp._locked_plane_hit() == null)
+	_events.clear()
+	hp._process_tap(0.0)
+	_report.check("releasing off-plane still sends RELEASED to A",
+			_events == ["A:release"], str(_events))
+	_report.check("the grab is cleared after release", hp._locked_target == null)
+	ray.global_rotation = Vector3.ZERO
+
 	rig.queue_free()
 	a.queue_free()
 	b.queue_free()
@@ -127,7 +148,9 @@ func _hover_body(name: String, pos: Vector3) -> StaticBody3D:
 ## Records one XR event on the body called `name`.
 func _record(name: String, ev: XRToolsPointerEvent) -> void:
 	var kind := "enter" if ev.event_type == XRToolsPointerEvent.Type.ENTERED else \
-			"exit" if ev.event_type == XRToolsPointerEvent.Type.EXITED else "other"
+			"exit" if ev.event_type == XRToolsPointerEvent.Type.EXITED else \
+			"press" if ev.event_type == XRToolsPointerEvent.Type.PRESSED else \
+			"release" if ev.event_type == XRToolsPointerEvent.Type.RELEASED else "other"
 	_events.append("%s:%s" % [name, kind])
 
 
