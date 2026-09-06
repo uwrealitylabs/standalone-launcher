@@ -141,22 +141,26 @@ introducing a second size-write path.
 At `start_resize()`:
 
 1. Focus first.
-2. Freeze the window's orthonormalized `global_transform`.
-3. Build a frozen interaction plane: its normal is the window's normalized face
-   normal (`basis.z`), and it passes through the selected handle collider's depth
-   centre rather than the window origin.
-4. Resolve and store the grab point by intersecting the pointer ray with that
-   plane. Do not use the raw physics collision point: it sits on the collider
-   surface and exists only for target selection and cursor rendering.
-5. Cache unit world axes `basis.x`, `basis.y`, and the starting `content_size`.
+2. Build the interaction plane from the window's current orthonormalized
+   `global_transform`: its normal is the normalized face normal (`basis.z`), and
+   it passes through the window origin at the visible surface. The handle
+   collider remains slightly in front for picking, but does not define the
+   manipulation plane.
+3. Resolve the grab point by intersecting the pointer ray with that plane. Do
+   not use the raw physics collision point: it sits on the collider surface and
+   exists only for target selection and cursor rendering.
+4. Store the grab point in window-local coordinates and cache the starting
+   `content_size`.
 
 Do not cache a start position; resizing never changes the window origin.
 
-For each move:
+For each move, rebuild the interaction plane from the window's current transform,
+intersect the pointer ray with it, and convert that hit to window-local coordinates:
 
 ```text
-dx = (hit - start_hit) dot cached_x_axis
-dy = (hit - start_hit) dot cached_y_axis
+delta = current_local_hit - start_local_hit
+dx = delta.x
+dy = delta.y
 
 R:  dw = +2dx, dh = 0
 L:  dw = -2dx, dh = 0
@@ -167,10 +171,11 @@ BL: dw = -2dx, dh = -2dy
 
 The factor of two is required: the grabbed edge follows the pointer while the
 opposite edge moves by the same amount around the fixed centre. Send
-`start_size + (dw, dh)` through `resize(..., true)`. Each move intersects that
-same frozen plane — never the raw collision point. Delete all resize position
-shift state and writes. If any non-gesture caller of `_get_plane()` remains, it
-must likewise use the live transformed face normal.
+`start_size + (dw, dh)` through `resize(..., true)`. Measuring both hits in the
+window's own frame cancels rigid window motion during a gesture, including
+locomotion moving the window arc and controllers together. Each move uses the
+live visible-surface plane — never the raw collision point. Delete all resize
+position-shift state and writes.
 
 Cache the manager's legal content-width cap when the gesture starts, as required
 by the parent design, and use it throughout that gesture. To keep that cached
@@ -430,7 +435,9 @@ hand tracking, or rendering performance without board testing.
   limit make its current accumulating pattern invalid.
 - Update `tests/resize_handle_test.gd`: a `0.3 m` edge displacement changes the
   dimension by `0.6 m`; remove the next-Z-layer test; retain band tiling,
-  thickness, collision-mask, and pickability checks; add affordance visibility.
+  thickness, collision-mask, and pickability checks; assert that the resize plane
+  is the visible window surface; add affordance visibility; and verify that moving
+  the window and pointer together mid-gesture does not change its size.
 - Update `tests/window_size_check.gd` for fixed centre, doubled edge deltas,
   rotated axes, and the managed resize path.
 - Update `tests/app_search_focus_test.gd` to use `open_windows` and find the
@@ -466,6 +473,10 @@ hand tracking, or rendering performance without board testing.
 - Focus and resize never change a slot/window transform.
 - Equal local pointer displacement produces equal size change at yaw `0`,
   `+theta`, and `-theta`.
+- The live resize plane passes through the visible window surface, not the handle
+  collider's depth centre.
+- Translating the window and pointer together during a resize changes no size;
+  subsequent pointer motion relative to the window still resizes normally.
 - Every supported handle changes only its intended dimensions and keeps the
   centre fixed, including after overshooting and recovering from a clamp.
 - Public/programmatic `resize()` cannot bypass the angular bound.
