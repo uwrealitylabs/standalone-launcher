@@ -397,11 +397,16 @@ events in that order whenever `_current_target` changes, while retaining the
 pointer's existing public hover signals. Cache the last hover position so an
 exit has a meaningful event position. Preserve target locking during a pinch.
 
-The window shows an affordance on `ENTERED` and hides it on `EXITED` or resize
-end, as the parent specifies. Hiding on release intentionally suppresses it
-until the pointer exits and re-enters that handle. Keep the pointer's current
-target intact so the next real exit is still delivered; do not synthesize a
-second enter immediately after release.
+The window's affordance is driven purely by hover: shown on `ENTERED`, hidden on
+`EXITED`, with a resize changing nothing. So the mark stays up through the whole
+gesture and remains after release while a ray is still on the handle, clearing
+only when the ray leaves. Count hovers per pointer (keyed by pointer instance
+id) rather than with a single flag: with two controllers, one hand's `EXITED`
+must not hide a mark the other hand is still on -- for instance when a resize
+moves the edge out from under the non-resizing ray. Since a pinch locks its
+pointer's target, the resizing hand emits no `EXITED` mid-gesture and stays
+counted; its mark clears on the first `EXITED` after release if its ray has
+left.
 
 The display-width inequality does not automatically account for collision bands
 that protrude into the gutter. Add a configured-layout pickability test at legal

@@ -152,7 +152,9 @@ func _check_pointer_event_drives_resize(win: SWindow) -> void:
 ## The affordance marks are driven purely by hover: an ENTERED shows the hovered
 ## handle's mark and only an EXITED hides it. A resize does not change that, so
 ## the mark stays up through the gesture and remains after release while the ray
-## is still on the handle. There is no top mark, matching the missing top handle.
+## is still on the handle. Hovers are counted per pointer, so with two rays the
+## mark persists until the last one leaves. There is no top mark, matching the
+## missing top handle.
 func _check_affordance_visibility(win: SWindow) -> void:
 	_report.section("resize affordances")
 	_report.check("there is no top affordance",
@@ -182,6 +184,26 @@ func _check_affordance_visibility(win: SWindow) -> void:
 	# Only leaving the handle hides it.
 	_emit(right, XRToolsPointerEvent.Type.EXITED, right.global_position)
 	_report.check("exiting the handle hides the mark", not mark.visible)
+
+	# Two rays on one handle: the mark must persist until the last leaves. This is
+	# the reported case -- the non-resizing ray slides off the edge mid-resize
+	# while the resizing ray is still on the handle.
+	var ray_a := Node3D.new()
+	var ray_b := Node3D.new()
+	_emit_from(right, XRToolsPointerEvent.Type.ENTERED, right.global_position, ray_a)
+	_emit_from(right, XRToolsPointerEvent.Type.PRESSED, grab, ray_a)
+	_emit_from(right, XRToolsPointerEvent.Type.ENTERED, right.global_position, ray_b)
+	_report.check("two rays on the handle show the mark", mark.visible)
+
+	_emit_from(right, XRToolsPointerEvent.Type.EXITED, right.global_position, ray_b)
+	_report.check("the mark stays while the resizing ray still hovers", mark.visible)
+	_emit_from(right, XRToolsPointerEvent.Type.RELEASED, grab, ray_a)
+	_report.check("the mark stays after release while a ray is on it", mark.visible)
+
+	_emit_from(right, XRToolsPointerEvent.Type.EXITED, right.global_position, ray_a)
+	_report.check("the mark hides once the last ray leaves", not mark.visible)
+	ray_a.free()
+	ray_b.free()
 
 
 ## The affordance group `win` shows for `handle_id`, or null if it has none.
@@ -250,8 +272,14 @@ func _rect(win: SWindow, handle_id: String) -> Rect2:
 
 
 func _emit(body: StaticBody3D, type: int, pos: Vector3) -> void:
+	_emit_from(body, type, pos, null)
+
+
+## Emits a handle event carrying `pointer`, so a test can act as more than one
+## controller by passing distinct pointer nodes.
+func _emit_from(body: StaticBody3D, type: int, pos: Vector3, pointer: Node3D) -> void:
 	body.emit_signal("pointer_event",
-			XRToolsPointerEvent.new(type, null, body, pos, pos))
+			XRToolsPointerEvent.new(type, pointer, body, pos, pos))
 
 
 ## Collider the pointer mask sees first at `world_pos`, or null for a miss.
