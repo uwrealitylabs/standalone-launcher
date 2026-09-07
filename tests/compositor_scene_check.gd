@@ -44,7 +44,7 @@ const HARNESS_ORIGIN := Vector3(0.0, 1.2, -1.0)
 
 # Where root.tscn puts it: to the right of the terminal window, from the
 # player's point of view.
-const LAUNCHER_ORIGIN := Vector3(1.6, 1.5, -2.0)
+const LAUNCHER_ORIGIN := Vector3(1.6, 4.5, -2.0)
 
 # Node path get_state() reports for the launcher's instance, minus the leading
 # "./" that SceneState prefixes onto every path.

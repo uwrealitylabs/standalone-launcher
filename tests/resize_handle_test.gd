@@ -37,14 +37,15 @@ func _initialize() -> void:
 
 	_check_mask_matches_pointers()
 	_check_depth_budget(win)
+	_check_resize_plane_is_window_surface(win)
 	_check_handles_are_pickable(win)
 	_check_content_still_pickable(win)
 	_check_border_tiles(win)
 	_check_thickness(win, "default size")
 	_check_pointer_event_drives_resize(win)
-	# Leaves the window at MIN_CONTENT_SIZE, which the check below relies on.
+	_check_resize_survives_window_move(win)
 	_check_thickness_shrinks_with_window(win)
-	await _check_handles_stay_behind_the_next_window(win)
+	_check_affordance_visibility(win)
 
 	_report.finish(self)
 
@@ -58,8 +59,9 @@ func _check_mask_matches_pointers() -> void:
 			"layer %d vs mask %d" % [SWindow.HANDLE_COLLISION_LAYER, POINTER_MASK])
 
 
-# Depth budget straight from the constants: forward of the window's own screen,
-# and clear of every collider belonging to the window one z-order in front.
+# Depth budget straight from the constants: the handles sit forward of the
+# window's own screen without sinking into it. Windows occupy separate slots on
+# the arc, so there is no stacked neighbour to clear.
 func _check_depth_budget(win: SWindow) -> void:
 	_report.section("depth budget")
 	var front := SWindow.HANDLE_Z + SWindow.HANDLE_DEPTH / 2.0
@@ -78,10 +80,22 @@ func _check_depth_budget(win: SWindow) -> void:
 			% [front, screen.y], front > screen.y)
 	_report.check("handle rear %+.3f does not sink into its own screen" % rear,
 			rear > screen.y - EPS)
-	_report.check("handle front %+.3f clears the next window's screen rear %+.3f"
-			% [front, SWindow.Z_STEP + screen.x], front < SWindow.Z_STEP + screen.x)
-	_report.check("handle front %+.3f clears the next window's handle rear %+.3f"
-			% [front, SWindow.Z_STEP + rear], front < SWindow.Z_STEP + rear)
+
+
+## The handle collider extends in front for picking, but resize motion is
+## projected onto the visible window surface rather than the collider's centre.
+func _check_resize_plane_is_window_surface(win: SWindow) -> void:
+	_report.section("resize plane")
+	var plane := win._live_resize_plane()
+	var xf := win.global_transform.orthonormalized()
+	var handle_centre := xf.origin + xf.basis.z * SWindow.HANDLE_Z
+
+	_report.check("the resize plane passes through the visible window surface",
+			absf(plane.distance_to(xf.origin)) < EPS)
+	_report.check("the resize plane faces along the window normal",
+			plane.normal.is_equal_approx(xf.basis.z))
+	_report.check("the handle collider centre remains in front of the resize plane",
+			absf(plane.distance_to(handle_centre) - SWindow.HANDLE_Z) < EPS)
 
 
 ## Rear and front z of `part`'s screen collider, in `win`-local space.
@@ -139,15 +153,117 @@ func _check_pointer_event_drives_resize(win: SWindow) -> void:
 	_report.check("PRESSED on the R handle starts a resize", win._resizing)
 	_report.check("the started resize is the R handle", win._resize_handle == "R")
 
+	# Fixed-centre resize: the grabbed edge follows the pointer while the opposite
+	# edge moves by the same amount, so a 0.3 m displacement widens the window by
+	# 0.6 m.
 	_emit(right, XRToolsPointerEvent.Type.MOVED, grab + Vector3(0.3, 0, 0))
-	_report.check("MOVED on the R handle widens the window by 0.3 (got %.4f)"
+	_report.check("MOVED on the R handle widens the window by 0.6 (got %.4f)"
 			% (win.content_size.x - before.x),
-			absf(win.content_size.x - before.x - 0.3) < EPS)
+			absf(win.content_size.x - before.x - 0.6) < EPS)
 	_report.check("the R handle followed the new edge",
 			absf(right.position.x - win.content_size.x / 2.0) < EPS)
 
 	_emit(right, XRToolsPointerEvent.Type.RELEASED, grab + Vector3(0.3, 0, 0))
 	_report.check("RELEASED on the R handle ends the resize", not win._resizing)
+
+
+## The gesture is measured in the window's own frame, so moving the window
+## mid-resize -- as locomotion does, sliding the whole arc via WindowFollow -- must
+## not change the size on its own. Grab, translate the window (and the pointer with
+## it, as the rig carries both), and confirm the size holds; then a genuine drag on
+## top of the move still resizes correctly.
+func _check_resize_survives_window_move(win: SWindow) -> void:
+	_report.section("a mid-gesture window move does not corrupt the resize")
+	var before: Vector2 = win.content_size
+	var start_pos: Vector3 = win.global_position
+	var right := _handle(win, "R")
+	var grab := right.global_position
+	_emit(right, XRToolsPointerEvent.Type.PRESSED, grab)
+
+	# Locomotion slides the window; the hand rides the same rig, so the pointer
+	# shifts by the identical world vector. Net pointer-vs-window motion is zero.
+	var shift := Vector3(2.0, 0.5, 0)
+	win.global_position += shift
+	_emit(right, XRToolsPointerEvent.Type.MOVED, grab + shift)
+	_report.check("a pure window move leaves the size unchanged (dx %.4f)"
+			% (win.content_size.x - before.x),
+			win.content_size.is_equal_approx(before))
+
+	# A real 0.3 m drag on top of the moved window still widens it by 0.6 m.
+	_emit(right, XRToolsPointerEvent.Type.MOVED, grab + shift + Vector3(0.3, 0, 0))
+	_report.check("a drag after the move still widens by 0.6 (got %.4f)"
+			% (win.content_size.x - before.x),
+			absf(win.content_size.x - before.x - 0.6) < EPS)
+
+	_emit(right, XRToolsPointerEvent.Type.RELEASED, grab + shift + Vector3(0.3, 0, 0))
+	# Leave the window as the following tests expect it: original pose and size.
+	win.global_position = start_pos
+	win.resize(before)
+
+
+## The affordance marks are driven purely by hover: an ENTERED shows the hovered
+## handle's mark and only an EXITED hides it. A resize does not change that, so
+## the mark stays up through the gesture and remains after release while the ray
+## is still on the handle. Hovers are counted per pointer, so with two rays the
+## mark persists until the last one leaves. There is no top mark, matching the
+## missing top handle.
+func _check_affordance_visibility(win: SWindow) -> void:
+	_report.section("resize affordances")
+	_report.check("there is no top affordance",
+			_affordance(win, "T") == null and _affordance(win, "TOP") == null)
+
+	var right := _handle(win, "R")
+	var mark := _affordance(win, "R")
+	if mark == null:
+		_report.check("the R affordance exists", false)
+		return
+	_report.check("affordances start hidden", not mark.visible)
+
+	_emit(right, XRToolsPointerEvent.Type.ENTERED, right.global_position)
+	_report.check("entering the R handle shows its mark", mark.visible)
+
+	# The mark stays up across the whole gesture, not just the hover before it.
+	var grab := right.global_position
+	_emit(right, XRToolsPointerEvent.Type.PRESSED, grab)
+	_emit(right, XRToolsPointerEvent.Type.MOVED, grab + Vector3(0.1, 0, 0))
+	_report.check("the mark stays shown during the resize", mark.visible)
+
+	# The ray is still on the handle after release, so the mark stays shown; no
+	# exit-and-re-enter is needed to bring it back.
+	_emit(right, XRToolsPointerEvent.Type.RELEASED, grab + Vector3(0.1, 0, 0))
+	_report.check("the mark stays shown after the resize ends", mark.visible)
+
+	# Only leaving the handle hides it.
+	_emit(right, XRToolsPointerEvent.Type.EXITED, right.global_position)
+	_report.check("exiting the handle hides the mark", not mark.visible)
+
+	# Two rays on one handle: the mark must persist until the last leaves. This is
+	# the reported case -- the non-resizing ray slides off the edge mid-resize
+	# while the resizing ray is still on the handle.
+	var ray_a := Node3D.new()
+	var ray_b := Node3D.new()
+	_emit_from(right, XRToolsPointerEvent.Type.ENTERED, right.global_position, ray_a)
+	_emit_from(right, XRToolsPointerEvent.Type.PRESSED, grab, ray_a)
+	_emit_from(right, XRToolsPointerEvent.Type.ENTERED, right.global_position, ray_b)
+	_report.check("two rays on the handle show the mark", mark.visible)
+
+	_emit_from(right, XRToolsPointerEvent.Type.EXITED, right.global_position, ray_b)
+	_report.check("the mark stays while the resizing ray still hovers", mark.visible)
+	_emit_from(right, XRToolsPointerEvent.Type.RELEASED, grab, ray_a)
+	_report.check("the mark stays after release while a ray is on it", mark.visible)
+
+	_emit_from(right, XRToolsPointerEvent.Type.EXITED, right.global_position, ray_a)
+	_report.check("the mark hides once the last ray leaves", not mark.visible)
+	ray_a.free()
+	ray_b.free()
+
+
+## The affordance group `win` shows for `handle_id`, or null if it has none.
+func _affordance(win: SWindow, handle_id: String) -> Node3D:
+	var root := win.get_node_or_null("ResizeAffordances")
+	if root == null:
+		return null
+	return root.get_node_or_null("Affordance" + handle_id) as Node3D
 
 
 ## Shrinks the window to MIN_CONTENT_SIZE and rechecks the bands, which must
@@ -200,59 +316,6 @@ func _check_border_tiles(win: SWindow) -> void:
 			absf(r.end.y - hh) < EPS)
 
 
-## A window's handles reach forward of its own screen, so they must still fall
-## short of the screen belonging to the window one z-order in front of it.
-##
-## Expects `back` to be at MIN_CONTENT_SIZE, so that the fresh default-sized
-## window placed in front of it is the larger of the two.
-func _check_handles_stay_behind_the_next_window(back: SWindow) -> void:
-	_report.section("handles stay behind the next window")
-	var front: SWindow = load(WINDOW_SCENE).instantiate()
-	root.add_child(front)
-	await physics_frame
-
-	back.z_order = 0
-	back.apply_z_order()
-	front.z_order = 1
-	front.apply_z_order()
-	front.global_position.x = back.global_position.x
-	front.global_position.y = back.global_position.y
-	await physics_frame
-	await physics_frame
-
-	_report.check("the front window is one Z_STEP ahead (%.4f)"
-			% (front.global_position.z - back.global_position.z),
-			absf(front.global_position.z - back.global_position.z - SWindow.Z_STEP) < EPS)
-
-	# Only a smaller window behind a larger one puts the back border over the
-	# front screen, which is the arrangement where a bad pick would bite
-	_report.check("the back window is the smaller of the two (%s vs %s)"
-			% [back.content_size, front.content_size],
-			back.content_size.x < front.content_size.x
-			and back.content_size.y < front.content_size.y)
-
-	# Aim where the back window's handles are; the front window's screen covers
-	# the same spot and is nearer, so it must take the ray.
-	for handle_id in ["L", "R", "B", "BL", "BR"]:
-		var behind := _handle(back, handle_id)
-		var hit := _cast_at(behind.global_position)
-		var owner_win := _owning_window(hit)
-		_report.check("ray over the back window's %s handle hits the front window (got %s)"
-				% [handle_id, _describe(hit)], owner_win == front)
-
-	front.free()
-
-
-## The SWindow that `node` belongs to, or null.
-func _owning_window(node: Object) -> SWindow:
-	var walk := node as Node
-	while walk != null:
-		if walk is SWindow:
-			return walk
-		walk = walk.get_parent()
-	return null
-
-
 func _rect(win: SWindow, handle_id: String) -> Rect2:
 	var body := _handle(win, handle_id)
 	var size := _box(win, handle_id).size
@@ -261,8 +324,14 @@ func _rect(win: SWindow, handle_id: String) -> Rect2:
 
 
 func _emit(body: StaticBody3D, type: int, pos: Vector3) -> void:
+	_emit_from(body, type, pos, null)
+
+
+## Emits a handle event carrying `pointer`, so a test can act as more than one
+## controller by passing distinct pointer nodes.
+func _emit_from(body: StaticBody3D, type: int, pos: Vector3, pointer: Node3D) -> void:
 	body.emit_signal("pointer_event",
-			XRToolsPointerEvent.new(type, null, body, pos, pos))
+			XRToolsPointerEvent.new(type, pointer, body, pos, pos))
 
 
 ## Collider the pointer mask sees first at `world_pos`, or null for a miss.
@@ -291,4 +360,3 @@ func _describe(node: Object) -> String:
 	if node == null:
 		return "nothing"
 	return (node as Node).get_path()
-
