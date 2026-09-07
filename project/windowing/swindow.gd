@@ -509,9 +509,12 @@ func _place_segment(seg: MeshInstance3D, pos: Vector3, size: Vector3) -> void:
 ## pointer still hovers it. Per-pointer counting keeps one hand's exit from hiding
 ## a mark the other hand is on. Unknown handle ids are ignored.
 func _set_handle_hovered(handle_id: String, pointer: Node3D, hovered: bool) -> void:
-	var hovers: Dictionary = _affordance_hovers.get(handle_id)
-	if hovers == null:
+	# Null-check while still untyped: assigning a missing key's null straight into
+	# a typed Dictionary would raise before the guard could run.
+	var raw = _affordance_hovers.get(handle_id)
+	if raw == null:
 		return
+	var hovers: Dictionary = raw
 	# Key by instance id, not the node itself, so a freed pointer never lingers as
 	# a live reference. 0 stands in for a null/synthetic pointer.
 	var key := pointer.get_instance_id() if is_instance_valid(pointer) else 0

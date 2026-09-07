@@ -15,15 +15,17 @@ class_name WindowManager extends Node3D
 enum Slot { LEFT, CENTRE, RIGHT }
 
 @export_group("Layout")
-## Fixed workspace-local point the slot arc curves around. Defaults so the CENTRE
-## slot lands near the legacy (0, 1.5, -2) window pose at the default radius.
+## Fixed workspace-local point the slot arc curves around. Kept at the player's
+## head pose so the arc always curves around the viewer; radius alone then sets
+## how far in front each window sits. The CENTRE slot lands at z = -radius.
 @export var reference_point := Vector3(0.0, 1.5, 0.0)
-## Arc radius R: distance from reference_point to every slot's content centre.
+## Arc radius R: distance from reference_point to every slot's content centre,
+## i.e. how far in front of the player the CENTRE window sits.
 @export var radius := 3.0
 ## Angular separation theta between adjacent slots (stored in radians).
 @export_range(1.0, 89.0, 0.1, "radians_as_degrees") var slot_angle := deg_to_rad(45.0)
 ## Empty gutter g kept between adjacent windows (stored in radians).
-@export_range(0.0, 89.0, 0.1, "radians_as_degrees") var gutter_angle := deg_to_rad(2.0)
+@export_range(0.0, 89.0, 0.1, "radians_as_degrees") var gutter_angle := deg_to_rad(3.0)
 ## Default window angular half-width beta_default (stored in radians).
 @export_range(1.0, 89.0, 0.1, "radians_as_degrees") var default_half_width := deg_to_rad(18.0)
 @export var default_height := 0.9
@@ -308,10 +310,12 @@ func _on_window_closed(win: SWindow) -> void:
 	_clear_slot(win)
 	open_windows.erase(win)
 	focus_history.erase(win)
+	# Only a promotion changes focus styling, and _focus_after_close -> focus()
+	# refreshes it. Closing a non-focused or the last window leaves every
+	# survivor's focus state as it was, so no separate visual refresh is needed.
 	if win == focused_window:
 		focused_window = null
 		_focus_after_close()
-	_update_focus_visuals()
 
 
 ## After the focused window closes, focus the most recent surviving slotted

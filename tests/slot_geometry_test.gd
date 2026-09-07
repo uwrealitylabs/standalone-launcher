@@ -42,9 +42,11 @@ func _initialize() -> void:
 	for slot in [WindowManager.Slot.LEFT, WindowManager.Slot.CENTRE, WindowManager.Slot.RIGHT]:
 		var xf: Transform3D = wm.slot_transform(slot)
 		_report.near("slot %d centre is R from C" % slot, xf.origin.distance_to(C), R, EPS)
-	_report.check("CENTRE lands near the legacy (0, 1.5, -2) pose",
+	# Arc centre sits at the player head pose, so CENTRE lands straight ahead at
+	# z = -radius (radius 3 -> z = -3).
+	_report.check("CENTRE lands straight ahead at z = -radius",
 			wm.slot_transform(WindowManager.Slot.CENTRE).origin.is_equal_approx(
-					Vector3(0.0, 1.5, -2.0)),
+					Vector3(0.0, 1.5, -R)),
 			str(wm.slot_transform(WindowManager.Slot.CENTRE).origin))
 	_report.check("RIGHT centre has positive local X",
 			wm.slot_transform(WindowManager.Slot.RIGHT).origin.x > EPS,
