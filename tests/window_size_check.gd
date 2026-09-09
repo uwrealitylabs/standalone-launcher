@@ -180,7 +180,7 @@ func _initialize() -> void:
 	_report.near("yaw -theta matches yaw 0", _width_change_for_yaw(win, deg_to_rad(-30)),
 			yaw_0, EPS)
 	win.rotation = Vector3.ZERO
-	win._apply_size(Vector2(1.5, 0.75))
+	win.resize(Vector2(1.5, 0.75))
 	_check_invariant(win)
 
 	_report.finish(self)
@@ -324,7 +324,7 @@ func _expected_res(size: Vector2, ppu: float) -> Vector2:
 func _check_fixed_centre(win: SWindow, handle: String, move: Vector3,
 		expect_dw: float, expect_dh: float) -> void:
 	win.rotation = Vector3.ZERO
-	win._apply_size(Vector2(1.5, 0.75))
+	win.resize(Vector2(1.5, 0.75))
 	var centre_before: Vector3 = win.content_3d.global_position
 	var size_before: Vector2 = win.content_size
 
@@ -348,7 +348,7 @@ func _check_fixed_centre(win: SWindow, handle: String, move: Vector3,
 ## width change, which a rotation-safe resize must leave at 0.6 regardless of yaw.
 func _width_change_for_yaw(win: SWindow, yaw: float) -> float:
 	win.rotation = Vector3(0, yaw, 0)
-	win._apply_size(Vector2(1.5, 0.75))
+	win.resize(Vector2(1.5, 0.75))
 	var width_before: float = win.content_size.x
 
 	var origin: Vector3 = win.global_position
