@@ -201,10 +201,12 @@ func _notify_content_suspended(suspended: bool) -> void:
 		scene.on_window_suspended(suspended)
 
 
-## Enables or disables every resize handle's collider. Handles are separate
+## Sets the `disabled` flag on every resize handle's collider — true disables
+## picking, false restores it. Named for the flag it writes so the call site
+## reads plainly (`_set_handles_disabled(true)` disables). Handles are separate
 ## bodies under ResizeHandles, so the addon's visibility cascade never reaches
 ## them; suspend/lock must toggle them explicitly.
-func _set_handle_collision(disabled: bool) -> void:
+func _set_handles_disabled(disabled: bool) -> void:
 	for body: StaticBody3D in _resize_handles.values():
 		(body.get_child(0) as CollisionShape3D).disabled = disabled
 
@@ -233,13 +235,13 @@ func set_suspended(suspended: bool) -> void:
 	if suspended:
 		content_3d.visible = false
 		header_3d.visible = false
-		_set_handle_collision(true)
+		_set_handles_disabled(true)
 		_clear_hover_affordances()
 		_set_key_routing(false)
 	else:
 		content_3d.visible = true
 		header_3d.visible = true
-		_set_handle_collision(false)
+		_set_handles_disabled(false)
 	_notify_content_suspended(suspended)
 
 
@@ -255,7 +257,7 @@ func set_interaction_locked(locked: bool) -> void:
 	_interaction_locked = locked
 	content_3d.enabled = not locked
 	header_3d.enabled = not locked
-	_set_handle_collision(locked)
+	_set_handles_disabled(locked)  # disabled == locked
 	if locked:
 		_clear_hover_affordances()
 		_set_key_routing(false)
