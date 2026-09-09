@@ -308,6 +308,11 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	# Focus, then anchor the grab in the window's own frame (to_local) so later
 	# frames can re-measure against the live window.
 	focus()
+	# Gate on the manager's interaction state after focus (a docked focus request
+	# always succeeds, so the pressed window qualifies): a suspended sibling or a
+	# window mid-transition must not resize itself.
+	if manager and not manager.can_interact(self):
+		return
 	var hit = _resolve_pointer_hit(event, _live_resize_plane())
 	if hit == null:
 		return

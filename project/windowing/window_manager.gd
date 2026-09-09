@@ -14,6 +14,12 @@ class_name WindowManager extends Node3D
 ## LEFT, CENTRE, RIGHT is load-bearing; fill/fallback order is chosen explicitly.
 enum Slot { LEFT, CENTRE, RIGHT }
 
+## Solo presentation state. DOCKED is the ordinary multi-window layout; ENTERING
+## and EXITING bracket the animated transition (making its direction explicit and
+## acting as a hard gate); SOLO is one window presented alone. soloed_window is set
+## throughout ENTERING, SOLO and EXITING.
+enum Presentation { DOCKED, ENTERING, SOLO, EXITING }
+
 @export_group("Layout")
 ## Fixed workspace-local point the slot arc curves around. Kept at the player's
 ## head pose so the arc always curves around the viewer; radius alone then sets
@@ -34,6 +40,9 @@ enum Slot { LEFT, CENTRE, RIGHT }
 ## Default content size a window takes on entering solo. Device-tunable; validated
 ## to lie within [MIN_CONTENT_SIZE, MAX_CONTENT_SIZE].
 @export var default_solo_size := Vector2(1.4, 0.9)
+## Duration of the solo enter/exit tween, seconds. 0 runs the commit synchronously
+## (tests / reduced motion), so the state never rests mid-transition. Device-tunable.
+@export var solo_transition_duration := 0.25
 
 # Explicit lifetime/placement/focus state. Invariants: every open window sits in
 # exactly one slot or once in stashed_queue; focused_window is open and slotted
@@ -45,6 +54,17 @@ var stashed_queue: Array[SWindow] = []
 var focused_window: SWindow = null
 var focus_history: Array[SWindow] = [] # index 0 is most recent
 var soloed_window: SWindow = null
+
+# Solo state machine. _solo_state gates every transition; _solo_tween is the live
+# enter/exit tween (null when none). _solo_token is a generation counter bumped on
+# every new tween and on close-interruption, so a stale tween_method step or
+# finished callback returns immediately instead of writing a freed or re-presented
+# window.
+var _solo_state := Presentation.DOCKED
+var _solo_tween: Tween = null
+var _solo_token := 0
+signal solo_entered(win)
+signal solo_exited()
 
 # The window currently granted exclusive resize ownership, or null. Only one
 # window may resize at a time: the cap it froze at gesture start stays valid
@@ -190,6 +210,22 @@ func cancel_active_resize() -> void:
 		resizing_window = null
 
 
+## Whether `win` may be interacted with (resized) in the current presentation
+## state. In SOLO only the soloed window qualifies; in DOCKED any valid open,
+## slotted window does (start_resize focuses first and a docked focus request
+## always succeeds, so the pressed window becomes interactive); mid-transition
+## (ENTERING/EXITING) no window does. A defensive backstop — the interaction lock
+## and sibling suspension do the real work.
+func can_interact(win: SWindow) -> bool:
+	match _solo_state:
+		Presentation.SOLO:
+			return win == soloed_window
+		Presentation.DOCKED:
+			return is_instance_valid(win) and win in open_windows and _slot_of(win) != -1
+		_:
+			return false
+
+
 # --- Phase 0 slot geometry -------------------------------------------------
 # Pure functions of the Layout tunables. They describe where a slot sits and how
 # wide a window may grow; they do not read or mutate live window state beyond
@@ -280,6 +316,9 @@ func validate_tunables() -> void:
 		push_error("Layout.default_solo_size must lie within the numeric content "
 				+ "limits; clamping.")
 		default_solo_size = solo_clamped
+	if solo_transition_duration < 0.0:
+		push_error("Layout.solo_transition_duration must be >= 0; clamping to 0.")
+		solo_transition_duration = 0.0
 
 	# Fit constraints.
 	if gutter_angle >= slot_angle:
@@ -331,10 +370,151 @@ func _update_focus_visuals() -> void:
 			win.set_focused_visual(win == focused_window)
 
 
+# --- Solo mode -------------------------------------------------------------
+# A presentation mode layered over focus: one window moves to CENTRE, resizes to
+# default_solo_size, and every other window is suspended. Its slot and content_size
+# are untouched. Transitions are animated by a manager-owned tween; ENTERING and
+# EXITING reject all optional layout-mutating operations.
+
+## Enters solo mode on `win`: focuses it, suspends every other open window, and
+## animates it to the CENTRE slot at default_solo_size. Rejected unless currently
+## DOCKED and `win` is open and slotted. Emits solo_entered on completion.
+func enter_solo(win: SWindow) -> void:
+	if _solo_state != Presentation.DOCKED:
+		return
+	if not is_instance_valid(win) or win not in open_windows or _slot_of(win) == -1:
+		return
+	cancel_active_resize()
+	focus(win)
+	_solo_state = Presentation.ENTERING
+	soloed_window = win
+	# Start size = the visible content size, so the animation begins where the
+	# window actually is.
+	win.current_solo_size = win.content_size
+	win.set_interaction_locked(true)
+	for other in open_windows:
+		if other != win and is_instance_valid(other):
+			other.set_suspended(true)
+
+	win.set_transitioning(true)
+	_start_transition(win, win.transform, slot_transform(Slot.CENTRE),
+			win.content_size, clamp_solo_size(win, default_solo_size),
+			Presentation.ENTERING)
+
+
+## Exits solo mode, animating the soloed window back to its slot and content_size
+## and restoring the docked layout. Rejected unless currently SOLO. Emits
+## solo_exited on completion.
+func exit_solo() -> void:
+	if _solo_state != Presentation.SOLO:
+		return
+	cancel_active_resize()
+	var win := soloed_window
+	_solo_state = Presentation.EXITING
+	win.set_transitioning(true)
+	win.set_interaction_locked(true)
+	# Siblings stay suspended (non-interactive) for the whole exit tween.
+	_start_transition(win, win.transform, slot_transform(_slot_of(win)),
+			win.current_solo_size, win.content_size, Presentation.EXITING)
+
+
+## Bumps the generation counter, invalidating any in-flight tween's step and
+## finished callbacks, and returns the new token.
+func _new_solo_token() -> int:
+	_solo_token += 1
+	return _solo_token
+
+
+## Drives a solo transition from (start_xf, from_size) to (target_xf, to_size)
+## over solo_transition_duration for `phase` (ENTERING/EXITING). A zero duration
+## commits synchronously so the state never rests mid-transition; otherwise a
+## cubic-in-out tween interpolates and its finished handler commits exactly.
+func _start_transition(win: SWindow, start_xf: Transform3D, target_xf: Transform3D,
+		from_size: Vector2, to_size: Vector2, phase: Presentation) -> void:
+	var tok := _new_solo_token()
+	if solo_transition_duration <= 0.0:
+		_commit_transition(tok, win, target_xf, to_size, phase)
+		return
+	_solo_tween = create_tween()
+	_solo_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_solo_tween.tween_method(
+			_solo_step.bind(tok, win, start_xf, target_xf, from_size, to_size, phase),
+			0.0, 1.0, solo_transition_duration)
+	_solo_tween.finished.connect(
+			_commit_transition.bind(tok, win, target_xf, to_size, phase))
+
+
+## One tween frame: interpolates transform and presentation size at progress `t`.
+## Guards first on the token, phase and window validity, so a stale or superseded
+## tween writes nothing.
+func _solo_step(t: float, tok: int, win: SWindow, start_xf: Transform3D,
+		target_xf: Transform3D, from_size: Vector2, to_size: Vector2,
+		phase: Presentation) -> void:
+	if tok != _solo_token or _solo_state != phase or not is_instance_valid(win):
+		return
+	win.transform = start_xf.interpolate_with(target_xf, t)
+	win.current_solo_size = from_size.lerp(to_size, t)
+	win._apply_size(win.current_solo_size, true)
+
+
+## Snaps a transition to its exact target and settles the docked/solo state.
+## Guards on token, phase and validity so a killed or superseded transition
+## commits nothing. Applies the exact size first (settling resolution
+## synchronously), then clears the transitioning flag.
+func _commit_transition(tok: int, win: SWindow, target_xf: Transform3D,
+		final_size: Vector2, phase: Presentation) -> void:
+	if tok != _solo_token or _solo_state != phase or not is_instance_valid(win):
+		return
+	win.transform = target_xf
+	win.current_solo_size = final_size
+	win._apply_size(final_size, false)
+	win.set_transitioning(false)
+	_solo_tween = null
+	if phase == Presentation.ENTERING:
+		win.set_interaction_locked(false)
+		_solo_state = Presentation.SOLO
+		emit_signal("solo_entered", win)
+	else:
+		_commit_exit(win)
+
+
+## Exit commit: normalizes the workspace back to the docked layout and emits
+## solo_exited. Reactivates every sibling, discards the solo size, clears solo
+## state, and re-routes the soloed window's input (focus stays on it).
+func _commit_exit(win: SWindow) -> void:
+	for other in open_windows:
+		if other != win and is_instance_valid(other):
+			other.set_suspended(false)
+	win.current_solo_size = Vector2.ZERO
+	soloed_window = null
+	_solo_state = Presentation.DOCKED
+	win.set_interaction_locked(false)  # re-routes input since focused_window == win
+	emit_signal("solo_exited")
+
+
 ## Drops a closed window from all state and, if it was focused, promotes the most
 ## recent surviving slotted window. Survivors are never moved or resized, so a
-## sparse slot layout is left as-is.
+## sparse slot layout is left as-is. If the closing window was soloed, first resets
+## every transition field defensively (a UI close is impossible mid-tween — the
+## buttons are dead — so this covers programmatic teardown / disappearance).
 func _on_window_closed(win: SWindow) -> void:
+	var was_soloed := win == soloed_window
+	if was_soloed:
+		cancel_active_resize()
+		if _solo_tween != null:
+			_solo_tween.kill()
+		_solo_tween = null
+		_solo_token += 1  # invalidate any pending step/finished callback
+		if is_instance_valid(win):
+			win.set_transitioning(false)
+		# Load-bearing: while soloed_window != null, focus() rejects every survivor,
+		# so clear it before _focus_after_close can promote one.
+		soloed_window = null
+		_solo_state = Presentation.DOCKED
+		for other in open_windows:
+			if other != win and is_instance_valid(other):
+				other.set_suspended(false)
+
 	release_resize(win) # closing the active window clears resize ownership
 	_clear_slot(win)
 	open_windows.erase(win)
@@ -345,6 +525,11 @@ func _on_window_closed(win: SWindow) -> void:
 	if win == focused_window:
 		focused_window = null
 		_focus_after_close()
+
+	# The killed tween emits no normal completion and the bumped token invalidates
+	# any stale finished callback, so this is the sole solo_exited for the close.
+	if was_soloed:
+		emit_signal("solo_exited")
 
 
 ## After the focused window closes, focus the most recent surviving slotted

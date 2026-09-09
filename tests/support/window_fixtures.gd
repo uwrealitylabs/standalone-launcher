@@ -51,3 +51,20 @@ static func handle(win: Node3D, handle_id: String) -> StaticBody3D:
 		if child.get_meta("handle_id", "") == handle_id:
 			return child as StaticBody3D
 	return null
+
+
+## The CollisionShape3D node of the resize handle `win` tagged with `handle_id`,
+## or null when the window has no such handle. (Companion to [method shape], which
+## returns the Shape resource, and [method body], the StaticBody3D.)
+static func get_handle_collision(win: Node3D, handle_id: String) -> CollisionShape3D:
+	var body := handle(win, handle_id)
+	return body.get_child(0) as CollisionShape3D if body else null
+
+
+## True when every one of `win`'s five resize handle colliders is disabled.
+static func all_handles_disabled(win: Node3D) -> bool:
+	for handle_id in ["L", "R", "B", "BL", "BR"]:
+		var col := get_handle_collision(win, handle_id)
+		if col == null or not col.disabled:
+			return false
+	return true
