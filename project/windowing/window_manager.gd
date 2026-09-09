@@ -31,6 +31,9 @@ enum Slot { LEFT, CENTRE, RIGHT }
 @export var default_height := 0.9
 @export var min_height := 0.2
 @export var max_height := 2.5
+## Default content size a window takes on entering solo. Device-tunable; validated
+## to lie within [MIN_CONTENT_SIZE, MAX_CONTENT_SIZE].
+@export var default_solo_size := Vector2(1.4, 0.9)
 
 # Explicit lifetime/placement/focus state. Invariants: every open window sits in
 # exactly one slot or once in stashed_queue; focused_window is open and slotted
@@ -149,6 +152,15 @@ func clamp_content_size(win: SWindow, desired: Vector2) -> Vector2:
 			clampf(desired.y, min_h, max_h))
 
 
+## Clamps `desired` to solo safety limits only — the numeric
+## [MIN_CONTENT_SIZE, MAX_CONTENT_SIZE] range in Phase 1. Unlike
+## [method clamp_content_size] it never consults the angular budget or a frozen
+## width cap: a soloed window is centred and alone, so no pairwise slot constraint
+## applies. Real FOV/render-target/comfort limits are device-tuned later.
+func clamp_solo_size(win: SWindow, desired: Vector2) -> Vector2:
+	return desired.clamp(win.MIN_CONTENT_SIZE, win.MAX_CONTENT_SIZE)
+
+
 ## Grants `win` exclusive resize ownership. Returns false without changing state
 ## when another still-valid window already holds it, so a second simultaneous
 ## gesture is refused rather than corrupting the frozen cap. Idempotent for the
@@ -251,6 +263,12 @@ func validate_tunables() -> void:
 				+ "numeric limits; clamping.")
 		max_height = maxf(max_height, min_height)
 		default_height = clampf(default_height, min_height, max_height)
+	var solo_clamped: Vector2 = default_solo_size.clamp(
+			SWindow.MIN_CONTENT_SIZE, SWindow.MAX_CONTENT_SIZE)
+	if not solo_clamped.is_equal_approx(default_solo_size):
+		push_error("Layout.default_solo_size must lie within the numeric content "
+				+ "limits; clamping.")
+		default_solo_size = solo_clamped
 
 	# Fit constraints.
 	if gutter_angle >= slot_angle:

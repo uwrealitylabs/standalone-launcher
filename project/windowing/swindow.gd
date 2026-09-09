@@ -65,8 +65,18 @@ const HANDLE_Z := 0.01
 # Must intersect the controller raycasts' collision_mask in root.tscn
 const HANDLE_COLLISION_LAYER := 4194304
 
-# Size of the actual content, not the header. The literal is a placeholder.
+# Size of the actual content, not the header. Persistent across a solo
+# presentation, which uses `current_solo_size` instead. The literal is a
+# placeholder.
 var content_size := Vector2(1.5, 0.75)
+# Animated/live solo presentation size. Meaningful only while this window is
+# `manager.soloed_window` (manager state ENTERING/SOLO/EXITING); reset to
+# Vector2.ZERO after exit completes.
+var current_solo_size := Vector2.ZERO
+# The size the geometry currently reflects — the argument of the last _apply_size,
+# independent of which persistent field (content_size / current_solo_size) is
+# authoritative. The resolution subsystem and the geometry helpers read this.
+var _active_size := Vector2.ZERO
 const HEADER_HEIGHT  : float = 0.08     # fixed header height in world units
 const MIN_CONTENT_SIZE := Vector2(0.4, 0.2)
 const MAX_CONTENT_SIZE := Vector2(3.0, 2.5)
@@ -99,6 +109,7 @@ func _ready() -> void:
 	# Seed from the authored scene, not from the script defaults above, so the
 	# two cannot silently disagree.
 	content_size = content_3d.screen_size
+	_active_size = content_size
 	PIXELS_PER_UNIT = content_3d.viewport_size.x / (0.00001 + content_3d.screen_size.x)
 	HEADER_PIXELS_PER_UNIT = header_3d.viewport_size.x / (0.00001 + header_3d.screen_size.x)
 
@@ -199,7 +210,7 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	_resizing           = true
 	_resize_handle      = handle
 	_resize_start_local = to_local(hit)
-	_resize_start_size  = content_size
+	_resize_start_size  = _presentation_size()
 	# Freeze the width cap: exclusive ownership means no other window's width
 	# changes, so it stays valid for the whole gesture.
 	_resize_max_width   = manager.max_content_width_for(self) if manager else MAX_CONTENT_SIZE.x
@@ -214,7 +225,8 @@ func update_resize(hit_world: Vector3) -> void:
 	# Displacement from the grab, both points window-local so any rigid motion since
 	# the grab cancels out. Fixed-centre rule: the grabbed edge follows the pointer
 	# and the opposite edge mirrors it, so the dimension changes by twice the
-	# displacement. Route through resize() so the managed clamp can't be bypassed.
+	# displacement. Route through the internal policy directly (not the public
+	# resize(), which cancels gestures) so the managed clamp can't be bypassed.
 	var d := to_local(hit_world) - _resize_start_local
 	var dx := d.x
 	var dy := d.y
@@ -234,7 +246,7 @@ func update_resize(hit_world: Vector3) -> void:
 			dw = -2.0 * dx
 			dh = -2.0 * dy
 
-	resize(_resize_start_size + Vector2(dw, dh), true)
+	_apply_resize_request(_resize_start_size + Vector2(dw, dh), true)
 
 
 ## Ends the resize and settles the render resolutions at the final size.
@@ -247,37 +259,61 @@ func stop_resize() -> void:
 		manager.release_resize(self)
 	set_process(false)
 	# Gesture over: settle exactly, whatever the throttle last committed
-	_apply_size(content_size)
+	_apply_size(_presentation_size())
 
 
-## Resizes the window's content to `desired`. All managed size requests route
-## through the manager's clamp so no caller can bypass the layout's size policy;
-## a standalone window falls back to the numeric clamp. `live` omits the render
-## resolutions, as in [method _apply_size].
+## Public programmatic resize entry to `desired`. Existing callers (tests, window
+## creation) use this. Commit 1 forwards straight to the internal policy; a later
+## commit flips it to delegate through WindowManager.resize_window for the
+## state/gesture gate. Not on the gesture path (update_resize calls the policy
+## directly). `live` omits the render resolutions, as in [method _apply_size].
 func resize(desired: Vector2, live: bool = false) -> void:
-	var clamped: Vector2
-	if manager:
-		clamped = manager.clamp_content_size(self, desired)
+	_apply_resize_request(desired, live)
+
+
+## The size this window currently presents at: its live solo size while it is the
+## manager's soloed window, otherwise its persistent content_size. Every "current
+## size" read goes through here so the solo and content sizes stay separate.
+func _presentation_size() -> Vector2:
+	if manager and manager.soloed_window == self:
+		return current_solo_size
+	return content_size
+
+
+## Internal resize policy: clamps `desired` for the current presentation mode,
+## writes the owning size field, and applies the geometry. Gesture frames and the
+## programmatic resize path call this; it is not the public entry. `live` omits
+## the render resolutions, as in [method _apply_size].
+func _apply_resize_request(desired: Vector2, live: bool = false) -> void:
+	if manager and manager.soloed_window == self:
+		# Solo path: clamp to solo safety limits and write the live solo size only.
+		current_solo_size = manager.clamp_solo_size(self, desired)
+		_apply_size(current_solo_size, live)
+	elif manager:
+		content_size = manager.clamp_content_size(self, desired)
+		_apply_size(content_size, live)
 	else:
-		clamped = desired.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
-	_apply_size(clamped, live)
+		# Standalone window (e.g. a headless test fixture): numeric clamp only.
+		content_size = desired.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
+		_apply_size(content_size, live)
 
 
-## Resizes the window's content to `new_size`, clamped to MIN/MAX_CONTENT_SIZE,
-## and brings the header and both screens' geometry with it.
-##
-## Sole writer of size state. `live` omits the render resolutions; the caller
-## must call again without it to settle them.
-func _apply_size(new_size: Vector2, live: bool = false) -> void:
-	content_size = new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
-	var header_size := Vector2(content_size.x, HEADER_HEIGHT)
+## Mode-independent geometry writer: drives the quad, collision, header
+## placement, resize handles and affordances from `size`, and records it as
+## [member _active_size] for the resolution subsystem. It does NOT decide or write
+## which persistent size field is authoritative — the caller owns that write. It
+## does not re-clamp; callers pass an already-clamped size. `live` omits the
+## render resolutions; the caller must call again without it to settle them.
+func _apply_size(size: Vector2, live: bool = false) -> void:
+	_active_size = size
+	var header_size := Vector2(size.x, HEADER_HEIGHT)
 
 	# Assigning screen_size drives the quad, the static body's translator and
 	# the collision shape as one, so they cannot disagree mid-gesture.
-	content_3d.screen_size = content_size
+	content_3d.screen_size = size
 	header_3d.screen_size = header_size
 	# Header sits on top of the content; both are centred on the window
-	header_3d.position.y = (content_size.y + HEADER_HEIGHT) / 2.0
+	header_3d.position.y = (size.y + HEADER_HEIGHT) / 2.0
 	_layout_resize_handles()
 	_layout_resize_affordances()
 
@@ -291,14 +327,14 @@ func _apply_size(new_size: Vector2, live: bool = false) -> void:
 ## Reallocates both render targets so each surface renders at its authored
 ## pixel density for the current content size.
 func _commit_resolution() -> void:
-	var header_size := Vector2(content_size.x, HEADER_HEIGHT)
-	content_3d.viewport_size = _viewport_resolution(content_size, PIXELS_PER_UNIT)
+	var header_size := Vector2(_active_size.x, HEADER_HEIGHT)
+	content_3d.viewport_size = _viewport_resolution(_active_size, PIXELS_PER_UNIT)
 	header_3d.viewport_size = _viewport_resolution(header_size, HEADER_PIXELS_PER_UNIT)
 	# Resizing a render target clears it; the addon's own refill runs on an
 	# unrelated clock, so re-arm the redraw here to avoid a visible blank flash.
 	_request_redraw(content_3d)
 	_request_redraw(header_3d)
-	_res_basis = content_size
+	_res_basis = _active_size
 	_res_pending = false
 	_since_commit = 0.0
 
@@ -329,8 +365,8 @@ func _tick_resolution(delta: float) -> void:
 func _stretch_exceeded() -> bool:
 	if _res_basis.x <= 0.0 or _res_basis.y <= 0.0:
 		return true
-	return absf(content_size.x / _res_basis.x - 1.0) > MAX_STRETCH \
-			or absf(content_size.y / _res_basis.y - 1.0) > MAX_STRETCH
+	return absf(_active_size.x / _res_basis.x - 1.0) > MAX_STRETCH \
+			or absf(_active_size.y / _res_basis.y - 1.0) > MAX_STRETCH
 
 
 ## Render resolution for a screen of `size` world units at `ppu` pixels per
@@ -391,10 +427,10 @@ func _build_resize_handles() -> void:
 
 ## Sizes and positions the handles to straddle the current content edges.
 func _layout_resize_handles() -> void:
-	var hw := content_size.x / 2.0
-	var hh := content_size.y / 2.0
-	var tx := minf(HANDLE_MAX_THICKNESS, content_size.x * HANDLE_THICKNESS_RATIO)
-	var ty := minf(HANDLE_MAX_THICKNESS, content_size.y * HANDLE_THICKNESS_RATIO)
+	var hw := _active_size.x / 2.0
+	var hh := _active_size.y / 2.0
+	var tx := minf(HANDLE_MAX_THICKNESS, _active_size.x * HANDLE_THICKNESS_RATIO)
+	var ty := minf(HANDLE_MAX_THICKNESS, _active_size.y * HANDLE_THICKNESS_RATIO)
 
 	# Each band is centred on its edge, so it reaches half its thickness outside
 	# the window and covers only half of it in content
@@ -466,13 +502,13 @@ func _make_affordance_segment(mat: StandardMaterial3D) -> MeshInstance3D:
 func _layout_resize_affordances() -> void:
 	if _resize_affordances.is_empty():
 		return
-	var hw := content_size.x / 2.0
-	var hh := content_size.y / 2.0
+	var hw := _active_size.x / 2.0
+	var hh := _active_size.y / 2.0
 	var t := AFFORDANCE_THICKNESS
 	# Cap each mark to a fraction of its edge so the two bottom corners never
 	# overlap and no mark spans a whole side.
-	var len_x := minf(AFFORDANCE_LENGTH, content_size.x * 0.4)
-	var len_y := minf(AFFORDANCE_LENGTH, content_size.y * 0.4)
+	var len_x := minf(AFFORDANCE_LENGTH, _active_size.x * 0.4)
+	var len_y := minf(AFFORDANCE_LENGTH, _active_size.y * 0.4)
 
 	# Edge marks: centred on each side, none on top.
 	_place_segment(_resize_affordances["L"].get_child(0),
