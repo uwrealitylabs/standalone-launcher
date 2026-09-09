@@ -179,6 +179,17 @@ func release_resize(win: SWindow) -> void:
 		resizing_window = null
 
 
+## Cancels the active resize gesture, if any: the owning window ends its drag,
+## resets its frozen cap, and settles at its current size. The single point that
+## clears an in-flight gesture before a transition or a conflicting programmatic
+## resize. No-op when no window is resizing.
+func cancel_active_resize() -> void:
+	if resizing_window != null and is_instance_valid(resizing_window):
+		resizing_window.cancel_resize()  # clears resizing_window via release_resize
+	else:
+		resizing_window = null
+
+
 # --- Phase 0 slot geometry -------------------------------------------------
 # Pure functions of the Layout tunables. They describe where a slot sits and how
 # wide a window may grow; they do not read or mutate live window state beyond
