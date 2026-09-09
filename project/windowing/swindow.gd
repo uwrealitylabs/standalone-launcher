@@ -18,6 +18,16 @@ signal on_focused(win: SWindow)
 # numeric clamp below.
 var manager: WindowManager = null
 
+# True while this window is suspended behind a solo presentation (a sibling of the
+# soloed window): surfaces hidden, all collision and key routing off.
+var is_suspended := false
+# True while this window (the soloed one) is interaction-locked for a tween:
+# collision and key routing off, mesh and redraw still live.
+var _interaction_locked := false
+# True while the manager is running a solo enter/exit tween on this window. Kept
+# separate from _resizing so both can gate _process through one owner.
+var _transitioning := false
+
 # Resize window variables
 var _resizing           := false
 var _resize_handle      := ""
@@ -154,20 +164,104 @@ func focus() -> void:
 	on_focused.emit(self)
 
 
-## Sets whether input events will be directed to this window, and tells the
-## content scene, if it defines on_window_focus_changed(bool), that focus moved.
-func set_input_enabled(enabled: bool) -> void:
+## Routes or unroutes physical keyboard/gamepad input to this window's surfaces.
+## Interaction concern only: it does not tell the content that focus changed, so
+## a transition lock can cut input without reporting a focus loss that never
+## happened.
+func _set_key_routing(enabled: bool) -> void:
 	content_3d.input_keyboard = enabled
 	content_3d.input_gamepad = enabled
 	# Gate the header's keys too, or every title bar keeps taking physical keys
 	# regardless of focus. Its gamepad flag is left as authored (off).
 	header_3d.input_keyboard = enabled
 
+
+## Tells the content scene, if it defines on_window_focus_changed(bool), that
+## focus moved. Notification concern only: it routes no input.
+func _notify_content_focus(enabled: bool) -> void:
 	# content_3d reports null until the scene is set on first focus; nothing to
 	# notify before then.
 	var scene := content_3d.get_scene_instance()
 	if scene and scene.has_method("on_window_focus_changed"):
 		scene.on_window_focus_changed(enabled)
+
+
+## Sets whether input events will be directed to this window, and tells the
+## content scene that focus moved. Used by the manager's focus(); preserves the
+## combined behaviour of the two concerns above.
+func set_input_enabled(enabled: bool) -> void:
+	_set_key_routing(enabled)
+	_notify_content_focus(enabled)
+
+## Notifies the content scene, if it defines on_window_suspended(bool), that it
+## was suspended or reactivated behind a solo presentation.
+func _notify_content_suspended(suspended: bool) -> void:
+	var scene := content_3d.get_scene_instance()
+	if scene and scene.has_method("on_window_suspended"):
+		scene.on_window_suspended(suspended)
+
+
+## Enables or disables every resize handle's collider. Handles are separate
+## bodies under ResizeHandles, so the addon's visibility cascade never reaches
+## them; suspend/lock must toggle them explicitly.
+func _set_handle_collision(disabled: bool) -> void:
+	for body: StaticBody3D in _resize_handles.values():
+		(body.get_child(0) as CollisionShape3D).disabled = disabled
+
+
+## Clears every handle's hover state and hides its affordance mark. A handle whose
+## collider is being disabled while a ray hovers it never emits EXITED, so its
+## separate visible mark would otherwise hang in the air. Call whenever handle
+## collision is taken away.
+func _clear_hover_affordances() -> void:
+	for hovers: Dictionary in _affordance_hovers.values():
+		hovers.clear()
+	for group: Node3D in _resize_affordances.values():
+		group.visible = false
+
+
+## Suspends or reactivates this window as a sibling of a solo presentation.
+## Idempotent. Suspending hides both surfaces (which stops redraw and, through the
+## addon's visibility cascade, disables their screen colliders), disables every
+## resize handle's collider explicitly, clears hover marks, and cuts key routing.
+## Reactivating reverses visibility and handle collision. Focus routing is owned
+## by focus(), not here.
+func set_suspended(suspended: bool) -> void:
+	if is_suspended == suspended:
+		return
+	is_suspended = suspended
+	if suspended:
+		content_3d.visible = false
+		header_3d.visible = false
+		_set_handle_collision(true)
+		_clear_hover_affordances()
+		_set_key_routing(false)
+	else:
+		content_3d.visible = true
+		header_3d.visible = true
+		_set_handle_collision(false)
+	_notify_content_suspended(suspended)
+
+
+## Locks or unlocks interaction on the soloed window for the length of a solo
+## tween: toggles collision and key routing only, leaving the mesh and redraw
+## live. Locking disables both screen colliders (through the surfaces' `enabled`,
+## since they stay visible) and every handle collider, and clears hover marks.
+## Unlock derives key-routing eligibility from focus (never a blind enable) and
+## never fires the focus hook. Idempotent.
+func set_interaction_locked(locked: bool) -> void:
+	if _interaction_locked == locked:
+		return
+	_interaction_locked = locked
+	content_3d.enabled = not locked
+	header_3d.enabled = not locked
+	_set_handle_collision(locked)
+	if locked:
+		_clear_hover_affordances()
+		_set_key_routing(false)
+	else:
+		_set_key_routing(manager != null and manager.focused_window == self)
+
 
 ## Dims the header while the window is not the focused one.
 func set_focused_visual(is_focused: bool) -> void:
@@ -180,10 +274,24 @@ func set_focused_visual(is_focused: bool) -> void:
 		mat.albedo_color = Color(0.6, 0.6, 0.6, 1.0)
 
 func _process(delta: float) -> void:
-	# Driven on a clock, not from update_resize, so a resize that stops moving
-	# without releasing still catches its resolution up.
-	if _resizing:
-		_tick_resolution(delta)
+	# Driven on a clock, not from update_resize, so a resize (or a transition tween
+	# sampling live sizes) that stops moving without releasing still catches its
+	# resolution up. _update_processing owns whether this runs at all.
+	_tick_resolution(delta)
+
+
+## Single owner of set_process: the resolution clock must run while either a
+## resize gesture or a solo transition is live. Every field write that changes
+## either must call this instead of set_process directly.
+func _update_processing() -> void:
+	set_process(_resizing or _transitioning)
+
+
+## Sets whether the manager is running a solo tween on this window, keeping the
+## resolution clock live for the duration. See [method _update_processing].
+func set_transitioning(on: bool) -> void:
+	_transitioning = on
+	_update_processing()
 
 ## The window's resize plane at its CURRENT pose: the visible surface through the
 ## window origin, facing along its normal. Rebuilt each frame so a window moved
@@ -214,7 +322,7 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	# Freeze the width cap: exclusive ownership means no other window's width
 	# changes, so it stays valid for the whole gesture.
 	_resize_max_width   = manager.max_content_width_for(self) if manager else MAX_CONTENT_SIZE.x
-	set_process(true)
+	_update_processing()
 
 
 ## Resizes the window to follow the pointer at `hit_world`, keeping the content
@@ -249,6 +357,24 @@ func update_resize(hit_world: Vector3) -> void:
 	_apply_resize_request(_resize_start_size + Vector2(dw, dh), true)
 
 
+## Cancels any in-flight resize gesture: ends it, releases resize ownership,
+## resets the frozen width cap, settles the geometry at the current presentation
+## size, and clears gesture state so no later pointer frame can resume the old
+## drag. Does not revert the size already applied. No-op when not resizing.
+func cancel_resize() -> void:
+	if not _resizing:
+		return
+	_resizing           = false
+	_resize_handle      = ""
+	_resize_start_local = Vector3.ZERO
+	_resize_start_size  = Vector2.ZERO
+	_resize_max_width   = MAX_CONTENT_SIZE.x
+	if manager:
+		manager.release_resize(self)
+	_update_processing()
+	_apply_size(_presentation_size())
+
+
 ## Ends the resize and settles the render resolutions at the final size.
 func stop_resize() -> void:
 	_resizing      = false
@@ -257,7 +383,7 @@ func stop_resize() -> void:
 	_resize_handle = ""
 	if manager:
 		manager.release_resize(self)
-	set_process(false)
+	_update_processing()
 	# Gesture over: settle exactly, whatever the throttle last committed
 	_apply_size(_presentation_size())
 
@@ -567,6 +693,6 @@ func _set_handle_hovered(handle_id: String, pointer: Node3D, hovered: bool) -> v
 func close() -> void:
 	# Cancel any in-flight resize so a missed RELEASED can't leave stale state
 	_resizing = false
-	set_process(false)
+	_update_processing()
 	on_closed.emit()
 	queue_free()
