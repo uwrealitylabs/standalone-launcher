@@ -109,9 +109,9 @@ func _create_window_now(content: PackedScene = null) -> SWindow:
 
 	var win: SWindow = window.instantiate()
 	win.manager = self
-	win.on_closed.connect(func(): _on_window_closed(win))
-	win.on_focused.connect(focus)
-	win.on_solo_requested.connect(_on_solo_requested)
+	win.closed.connect(func(): _on_window_closed(win))
+	win.focused.connect(focus)
+	win.solo_requested.connect(_on_solo_requested)
 
 	$WindowLayer.add_child(win)
 	open_windows.append(win)
