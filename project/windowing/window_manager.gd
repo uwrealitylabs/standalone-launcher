@@ -39,10 +39,10 @@ enum Presentation { DOCKED, ENTERING, SOLO, EXITING }
 ## aspect ratio (see default_size).
 @export var min_height := 0.2
 @export var max_height := 2.5
-## Solo size as a multiple of the default docked window size, so soloing always
-## enlarges relative to the docked default rather than tracking a fixed literal.
-## Device-tunable; validated to be positive.
-@export var solo_size_scale := 4.0
+## Horizontal half-angle a soloed window may fill at the arc radius (stored in
+## radians). Solo presents one window alone and is meant to fill the player's view,
+## so its size is capped by this FOV rather than the docked numeric width limit.
+@export_range(1.0, 89.0, 0.1, "radians_as_degrees") var solo_half_fov := deg_to_rad(45.0)
 ## Duration of the solo enter/exit tween, seconds. 0 runs the commit synchronously
 ## (tests / reduced motion), so the state never rests mid-transition. Device-tunable.
 @export var solo_transition_duration := 0.25
@@ -204,13 +204,13 @@ func clamp_content_size(win: SWindow, desired: Vector2) -> Vector2:
 			clampf(desired.y, min_h, max_h))
 
 
-## Clamps `desired` to solo safety limits only — the numeric
-## [MIN_CONTENT_SIZE, MAX_CONTENT_SIZE] range in Phase 1. Unlike
-## [method clamp_content_size] it never consults the angular budget or a frozen
-## width cap: a soloed window is centred and alone, so no pairwise slot constraint
-## applies. Real FOV/render-target/comfort limits are device-tuned later.
+## Clamps `desired` to the solo size range: the numeric minimum up to the
+## solo_half_fov cap (see max_solo_size), which is much larger than the docked width
+## limit so a soloed window can fill the player's view. Unlike
+## [method clamp_content_size] it never consults the angular budget or a frozen width
+## cap: a soloed window is centred and alone, so no pairwise slot constraint applies.
 func clamp_solo_size(win: SWindow, desired: Vector2) -> Vector2:
-	return desired.clamp(win.MIN_CONTENT_SIZE, win.MAX_CONTENT_SIZE)
+	return desired.clamp(win.MIN_CONTENT_SIZE, max_solo_size())
 
 
 ## Grants `win` exclusive resize ownership. Returns false without changing state
@@ -314,13 +314,20 @@ func default_size() -> Vector2:
 	return target.clamp(SWindow.MIN_CONTENT_SIZE, SWindow.MAX_CONTENT_SIZE)
 
 
-## Content size a window takes on entering solo: solo_size_scale times the default
-## docked size, clamped to the numeric content limits. Those limits share the content
-## aspect ratio, so a soloed window keeps the default ratio even when scaled past one.
+## Largest content size a soloed window may take: the solo_half_fov width at the arc
+## radius, at the content aspect ratio. Much larger than the docked cap, so a soloed
+## window fills the player's view. Shares the 16:9 ratio, so clamping to it preserves
+## the ratio (like the docked limits, but wider).
+func max_solo_size() -> Vector2:
+	var w := width_of_beta(solo_half_fov)
+	return Vector2(w, w / SWindow.CONTENT_ASPECT)
+
+
+## Content size a window takes on entering solo: the full solo FOV cap, so soloing
+## always fills the player's view.
 var default_solo_size: Vector2:
 	get:
-		var target := solo_size_scale * default_size()
-		return target.clamp(SWindow.MIN_CONTENT_SIZE, SWindow.MAX_CONTENT_SIZE)
+		return max_solo_size()
 
 
 ## Angular half-width a content width `w` subtends at the arc radius.
@@ -376,9 +383,9 @@ func validate_tunables() -> void:
 		push_error("Layout heights must satisfy min <= max within the numeric "
 				+ "limits; clamping.")
 		max_height = min_height
-	if solo_size_scale <= 0.0:
-		push_error("Layout.solo_size_scale must be > 0; clamping to 1.")
-		solo_size_scale = 1.0
+	if solo_half_fov <= 0.0 or solo_half_fov >= PI / 2.0:
+		push_error("Layout.solo_half_fov must be in (0, PI/2); clamping.")
+		solo_half_fov = clampf(solo_half_fov, 0.001, PI / 2.0 - 0.001)
 	if solo_transition_duration < 0.0:
 		push_error("Layout.solo_transition_duration must be >= 0; clamping to 0.")
 		solo_transition_duration = 0.0
@@ -394,12 +401,6 @@ func validate_tunables() -> void:
 		push_warning("Default width %.3f falls outside the numeric width limits." % w_default)
 	if SWindow.MIN_CONTENT_SIZE.x > w_default:
 		push_warning("Numeric minimum width exceeds the default width.")
-	# default_solo_size fits silently in its getter; warn if solo_size_scale is
-	# large enough that the target hits the numeric limits and is capped.
-	var solo_target := solo_size_scale * default_size()
-	if not solo_target.is_equal_approx(default_solo_size):
-		push_warning("solo_size_scale %.3f drives the solo size past the numeric "
-				% solo_size_scale + "content limits; it will be capped.")
 
 
 ## The currently focused window, or null when no slot is occupied. Compatibility
