@@ -3,8 +3,9 @@ extends SceneTree
 ## Verifies that the app browser's search bar can be typed into.
 ##
 ## A LineEdit only receives keys while it holds focus inside its own SubViewport.
-## This drives the real window manager rather than the menu alone, because the
-## focus handoff under test lives in SWindow.set_input_enabled.
+## The menu never grabs that focus itself: the search bar is focused only when the
+## user clicks it. This drives the real window manager rather than the menu alone,
+## because the keyboard routing under test lives in SWindow.set_input_enabled.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \
@@ -165,11 +166,12 @@ func _initialize() -> void:
 	_report.check("a second window exists to compare against", terminal_window != null)
 
 	# The terminal is spawned last, so it is the focused window at startup. The
-	# search bar still holds GUI focus, which is per-viewport and independent.
+	# menu grabs its search bar once in _ready, so the bar holds GUI focus (which is
+	# per-viewport and independent) even though the terminal is the focused window.
 	_report.section("focus at startup")
 	_report.check("the terminal starts as the focused window",
 			wm.get_focused_window() != menu_window)
-	_report.check("the search bar already holds focus in its own viewport",
+	_report.check("the search bar holds focus from _ready",
 			menu.search_bar.has_focus())
 
 	_report.section("the menu takes focus")
@@ -207,33 +209,19 @@ func _initialize() -> void:
 			tabbed is Button and _row_buttons(menu).has(tabbed),
 			str(tabbed))
 
-	_report.section("pressing a row returns focus to the search bar")
-	# The row without an Exec goes first: its press cannot get past the launch
-	# guard, so focus coming back proves the re-grab runs ahead of that guard.
-	var quiet := _button_for(menu, NO_EXEC)
-	_report.check("the Exec-less row has a button", quiet != null)
-	quiet.pressed.emit()
-	await process_frame
-	_report.check("a row that cannot launch still hands focus back",
-			menu.search_bar.has_focus())
-
+	_report.section("pressing a row no longer pulls focus back to the search bar")
+	# The re-grab after a launch was removed: a press leaves focus on the row, and
+	# the search bar is refocused only by clicking it again.
 	var zulu := _button_for(menu, MATCHES_Z)
 	zulu.grab_focus()
 	zulu.pressed.emit()
 	await process_frame
-	_report.check("a row that does launch hands focus back",
-			menu.search_bar.has_focus())
-
-	# Focus is taken back on `pressed`, which a press released off the row never
-	# emits. Pinned so the gap stays a recorded trade-off rather than a surprise.
-	_report.section("known gap: a press released off the row")
-	zulu.grab_focus()
-	await process_frame
-	_report.check("focus stays on the row when no press completes",
+	_report.check("focus stays on the row after pressing it",
 			gui.gui_get_focus_owner() == zulu)
-	menu.search_bar.grab_focus()
 
 	_report.section("typing into the focused menu")
+	# Simulate the user clicking the search bar to give it focus before typing.
+	menu.search_bar.grab_focus()
 	kb.on_key_pressed("Z", 122, false)
 	await process_frame
 	_report.check("the search bar received the keystroke",
@@ -256,17 +244,17 @@ func _initialize() -> void:
 	_report.check("the search text is unchanged while the terminal is focused",
 			menu.search_bar.text == "z", menu.search_bar.text)
 
-	# Dropping GUI focus first is what makes this a test of the handoff: left
-	# alone the search bar would still hold focus and the check would pass with
-	# the notification removed.
-	_report.section("focus returns with the window")
+	# Re-focusing the window must not silently re-grab the search bar: focus is the
+	# user's to give by clicking, and the two-click close bug came from grabbing it
+	# on the focus change. Drop focus, then confirm focusing the window leaves it off.
+	_report.section("re-focusing the window does not restore the caret")
 	menu.search_bar.release_focus()
 	_report.check("the search bar starts this check without focus",
 			not menu.search_bar.has_focus())
 	menu_window.focus()
 	await process_frame
-	_report.check("re-focusing the window puts the caret back in the search bar",
-			menu.search_bar.has_focus())
+	_report.check("re-focusing the window leaves the search bar unfocused",
+			not menu.search_bar.has_focus())
 
 	_remove_tree(_fixture_dir)
 	OS.unset_environment(FileUtils.SHARE_DIR_ENV)
