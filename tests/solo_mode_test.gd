@@ -33,6 +33,8 @@ func _initialize() -> void:
 	await _check_focus_and_suspension()
 	await _check_tween_safety()
 	await _check_gesture_cancellation()
+	await _check_resize_window_gate()
+	await _check_async_open()
 	await _check_state_machine_guards()
 	await _check_hover_affordance_safety()
 	await _check_close_mid_enter()
@@ -328,6 +330,174 @@ func _check_gesture_cancellation() -> void:
 			not win._resizing and wm.resizing_window == null)
 	await wm.solo_exited
 
+	await _free_wm(wm)
+
+
+# --- programmatic resize gate ----------------------------------------------
+
+## WindowManager.resize_window is the state-gated programmatic entry (SWindow.resize
+## delegates through it). In DOCKED a conflicting call cancels the active gesture —
+## whether it targets another window or the dragged one itself — before applying,
+## so no later pointer frame resurrects the stale gesture. Mid-transition every
+## resize is refused, and in SOLO only the soloed window resizes (a suspended
+## sibling is rejected, its content_size untouched).
+func _check_resize_window_gate() -> void:
+	_report.section("resize_window gate")
+	var wm := await _make_wm()
+	await _fill_left(wm)
+	var RIGHT := WindowManager.Slot.RIGHT
+	var CENTRE := WindowManager.Slot.CENTRE
+
+	var win_a: SWindow = wm.slots[RIGHT]
+	var win_b: SWindow = wm.slots[CENTRE]
+
+	# DOCKED: a conflicting resize on ANOTHER window cancels the active gesture,
+	# then resizes the target.
+	_press_handle(win_a, "R", Fixtures.handle(win_a, "R").global_position)
+	_report.check("a gesture is active on win_a", win_a._resizing and wm.resizing_window == win_a)
+	var expected_b := wm.clamp_content_size(win_b, Vector2(0.5, 0.5))
+	wm.resize_window(win_b, Vector2(0.5, 0.5))
+	_report.check("a conflicting resize cancels the active gesture first",
+			not win_a._resizing and wm.resizing_window == null)
+	_report.check("the conflicting resize applied to its target",
+			win_b.content_size.is_equal_approx(expected_b), str(win_b.content_size))
+
+	# DOCKED: a resize on the ACTIVELY DRAGGED window itself cancels its gesture,
+	# and a following update_resize frame does not resurrect the old drag.
+	_press_handle(win_a, "R", Fixtures.handle(win_a, "R").global_position)
+	var expected_a := wm.clamp_content_size(win_a, Vector2(0.5, 0.5))
+	wm.resize_window(win_a, Vector2(0.5, 0.5))
+	_report.check("resizing the dragged window itself cancels its gesture",
+			not win_a._resizing and wm.resizing_window == null)
+	win_a.update_resize(Fixtures.handle(win_a, "R").global_position + Vector3(0.5, 0, 0))
+	_report.check("a post-cancel update_resize does not overwrite the programmatic result",
+			win_a.content_size.is_equal_approx(expected_a), str(win_a.content_size))
+
+	# SOLO: only the soloed window resizes; a suspended sibling is rejected.
+	wm.solo_transition_duration = 0.0
+	wm.enter_solo(win_a)
+	var sib_size := win_b.content_size
+	win_b.resize(Vector2(2.0, 1.0))  # the public wrapper also routes through the gate
+	_report.check("a SOLO-time resize on a suspended sibling is rejected",
+			win_b.content_size.is_equal_approx(sib_size), str(win_b.content_size))
+	wm.resize_window(win_a, Vector2(1.2, 0.65))
+	_report.check("the soloed window resizes its solo size",
+			win_a.current_solo_size.is_equal_approx(Vector2(1.2, 0.65)),
+			str(win_a.current_solo_size))
+	_report.check("the soloed window's content_size stays put during a solo resize",
+			win_a.content_size.is_equal_approx(expected_a), str(win_a.content_size))
+
+	# Mid-transition: every resize is refused. Pause an EXIT tween to sit in EXITING.
+	wm.solo_transition_duration = 1.0
+	wm.exit_solo()
+	wm._solo_tween.pause()
+	wm._solo_tween.custom_step(0.3)
+	var held_solo := win_a.current_solo_size
+	wm.resize_window(win_a, Vector2(2.5, 2.0))
+	_report.check("resize_window is a no-op during EXITING",
+			win_a.current_solo_size.is_equal_approx(held_solo), str(win_a.current_solo_size))
+	wm._solo_tween.custom_step(1.0)  # drive home so teardown is clean
+	_report.check("the exit tween still completes to DOCKED",
+			wm._solo_state == WindowManager.Presentation.DOCKED)
+
+	await _free_wm(wm)
+
+
+# --- async open / ensure_docked --------------------------------------------
+
+## request_open_window is the async public open: while DOCKED it opens immediately;
+## while SOLO it animates the exit first and creates the window only once DOCKED;
+## mid-transition or with every slot full it returns null without disturbing state.
+## ensure_docked from SOLO never hangs on the zero-duration synchronous exit, and
+## _create_window_now self-enforces the state gate.
+func _check_async_open() -> void:
+	_report.section("async open / ensure_docked")
+
+	# DOCKED with a free slot: opens immediately.
+	var wm := await _make_wm()  # menu CENTRE, terminal RIGHT; LEFT free
+	var before := wm.open_windows.size()
+	var opened: SWindow = await wm.request_open_window()
+	_report.check("request_open_window while DOCKED opens a window",
+			opened != null and opened in wm.open_windows
+			and wm.open_windows.size() == before + 1)
+	await _free_wm(wm)
+
+	# SOLO with a free slot: animates the exit, then creates AFTER solo_exited.
+	wm = await _make_wm()  # LEFT still free
+	var win: SWindow = wm.slots[WindowManager.Slot.RIGHT]
+	wm.solo_transition_duration = 0.03
+	wm.enter_solo(win)
+	await wm.solo_entered
+	var count_before := wm.open_windows.size()
+	var count_at_exit := [-1]
+	wm.solo_exited.connect(func(): count_at_exit[0] = wm.open_windows.size())
+	var w2: SWindow = await wm.request_open_window()
+	_report.check("request_open_window while SOLO first exits solo",
+			wm._solo_state == WindowManager.Presentation.DOCKED)
+	_report.check("no window is created before the exit completes",
+			count_at_exit[0] == count_before, str(count_at_exit[0]))
+	_report.check("the window is created after unsoloing",
+			w2 != null and w2 in wm.open_windows
+			and wm.open_windows.size() == count_before + 1)
+	await _free_wm(wm)
+
+	# Mid-transition (ENTERING, then EXITING): rejected, transition undisturbed.
+	wm = await _make_wm()  # LEFT free, so the preflight is not what rejects
+	win = wm.slots[WindowManager.Slot.RIGHT]
+	wm.solo_transition_duration = 1.0
+	wm.enter_solo(win)
+	wm._solo_tween.pause()
+	var open_count := wm.open_windows.size()
+	var during_enter: SWindow = await wm.request_open_window()
+	_report.check("request_open_window during ENTERING returns null",
+			during_enter == null and wm.open_windows.size() == open_count)
+	_report.check("the ENTERING transition is undisturbed",
+			wm._solo_state == WindowManager.Presentation.ENTERING and wm.soloed_window == win)
+	wm._solo_tween.custom_step(2.0)  # completes normally
+	_report.check("the interrupted-open enter still reaches SOLO",
+			wm._solo_state == WindowManager.Presentation.SOLO)
+
+	wm.exit_solo()
+	wm._solo_tween.pause()
+	var during_exit: SWindow = await wm.request_open_window()
+	_report.check("request_open_window during EXITING returns null",
+			during_exit == null and wm.open_windows.size() == open_count)
+	wm._solo_tween.custom_step(2.0)
+	_report.check("the interrupted-open exit still reaches DOCKED",
+			wm._solo_state == WindowManager.Presentation.DOCKED)
+	await _free_wm(wm)
+
+	# SOLO with every slot full: the preflight returns null and stays in SOLO,
+	# never tearing the presentation down to fail.
+	wm = await _make_wm()
+	await _fill_left(wm)  # all three slots occupied
+	win = wm.slots[WindowManager.Slot.RIGHT]
+	wm.solo_transition_duration = 0.03
+	wm.enter_solo(win)
+	await wm.solo_entered
+	var exits := [0]
+	wm.solo_exited.connect(func(): exits[0] += 1)
+	var full: SWindow = await wm.request_open_window()
+	_report.check("a full-workspace open while SOLO returns null", full == null)
+	_report.check("the full-workspace open stays in SOLO without exiting",
+			wm._solo_state == WindowManager.Presentation.SOLO
+			and wm.soloed_window == win and exits[0] == 0)
+	await _free_wm(wm)
+
+	# Zero-duration ensure_docked from SOLO returns true without hanging.
+	wm = await _make_wm()
+	win = wm.slots[WindowManager.Slot.RIGHT]
+	wm.solo_transition_duration = 0.0
+	wm.enter_solo(win)
+	var docked: bool = await wm.ensure_docked()
+	_report.check("zero-duration ensure_docked from SOLO returns true",
+			docked and wm._solo_state == WindowManager.Presentation.DOCKED)
+
+	# _create_window_now self-enforces the state gate.
+	wm.enter_solo(win)  # back to SOLO synchronously (zero duration)
+	var direct := wm._create_window_now()
+	_report.check("_create_window_now while not DOCKED returns null and stays SOLO",
+			direct == null and wm._solo_state == WindowManager.Presentation.SOLO)
 	await _free_wm(wm)
 
 
