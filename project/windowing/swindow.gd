@@ -396,12 +396,18 @@ func stop_resize() -> void:
 
 
 ## Public programmatic resize entry to `desired`. Existing callers (tests, window
-## creation) use this. Commit 1 forwards straight to the internal policy; a later
-## commit flips it to delegate through WindowManager.resize_window for the
-## state/gesture gate. Not on the gesture path (update_resize calls the policy
-## directly). `live` omits the render resolutions, as in [method _apply_size].
+## creation) use this. When managed it delegates to WindowManager.resize_window so
+## it inherits the state gate and the unconditional gesture cancel; unmanaged (a
+## headless fixture) it falls back to the numeric clamp. Not on the gesture path —
+## update_resize calls the internal policy directly, so this wrapper's cancel is
+## safe. `live` applies only to the unmanaged fallback; the managed path always
+## settles (a programmatic resize is not a drag frame).
 func resize(desired: Vector2, live: bool = false) -> void:
-	_apply_resize_request(desired, live)
+	if manager:
+		manager.resize_window(self, desired)
+	else:
+		content_size = desired.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
+		_apply_size(content_size, live)
 
 
 ## The size this window currently presents at: its live solo size while it is the

@@ -72,14 +72,40 @@ signal solo_exited()
 var resizing_window: SWindow = null
 
 
-## Opens a window showing `content` in the first empty slot (CENTRE, then RIGHT,
-## then LEFT), sizes it to the layout default, and focuses it. Returns null and
-## warns without mutating state when all three slots are occupied.
+## Public request to open a window showing `content` while a solo presentation may
+## be active. Async: it unsolos first (awaiting the exit tween) so creation always
+## commits in the docked layout. The slot preflight runs BEFORE ensure_docked, so a
+## full workspace returns null without tearing down a live solo just to fail. A slot
+## may close during the await, which is fine — _create_window_now re-checks. Returns
+## the new window, or null when the workspace is full or a transition is in flight.
+func request_open_window(content: PackedScene = null) -> SWindow:
+	if _first_empty_slot() == -1:
+		return null
+	if not await ensure_docked():
+		return null
+	return _create_window_now(content)
+
+
+## Thin docked-path wrapper: opens a window with no solo semantics. Startup and the
+## existing test callers use this; it commits synchronously and never awaits.
 func create_window(content: PackedScene = null) -> SWindow:
+	return _create_window_now(content)
+
+
+## Synchronous commit that opens a window showing `content` in the first empty slot
+## (CENTRE, then RIGHT, then LEFT), sizes it to the layout default, and focuses it.
+## Self-enforces the state gate — warns and returns null unless DOCKED — so no
+## caller can create a window mid-transition or behind a solo. Returns null and
+## warns without mutating state when all three slots are occupied.
+func _create_window_now(content: PackedScene = null) -> SWindow:
+	if _solo_state != Presentation.DOCKED:
+		push_warning("Window creation is only allowed in the docked layout; ignoring.")
+		return null
 	var slot := _first_empty_slot()
 	if slot == -1:
 		push_warning("All three slots are occupied; ignoring the window request.")
 		return null
+	cancel_active_resize()
 
 	var win: SWindow = window.instantiate()
 	win.manager = self
@@ -91,10 +117,12 @@ func create_window(content: PackedScene = null) -> SWindow:
 	_assign_slot(win, slot)
 
 	# Install content before the initial focus so the content scene receives its
-	# first on_window_focus_changed callback.
+	# first on_window_focus_changed callback. Size through the internal policy, not
+	# resize(): the fresh window is not interactive yet (its slot is assigned but
+	# the interaction gate would reject it), so it must bypass resize_window.
 	if content:
 		win.set_content(content)
-	win.resize(Vector2(default_width(), default_height))
+	win._apply_resize_request(Vector2(default_width(), default_height))
 	focus(win)
 
 	return win
@@ -208,6 +236,23 @@ func cancel_active_resize() -> void:
 		resizing_window.cancel_resize()  # clears resizing_window via release_resize
 	else:
 		resizing_window = null
+
+
+## State-gated programmatic resize of `win` to `desired`. The public entry every
+## non-gesture resize takes (SWindow.resize delegates here). Rejects the request
+## unless can_interact(win) allows it in the current state — so mid-transition
+## (ENTERING/EXITING) all resizes are refused, and in SOLO only the soloed window
+## resizes (a suspended sibling is rejected, its content_size untouched). Cancels
+## any active gesture unconditionally — including on the actively dragged window
+## itself, so a following pointer frame cannot resurrect the stale gesture and
+## overwrite this result — then applies through the window's internal policy.
+func resize_window(win: SWindow, desired: Vector2) -> void:
+	if not is_instance_valid(win) or win not in open_windows:
+		return
+	if not can_interact(win):
+		return
+	cancel_active_resize()
+	win._apply_resize_request(desired)
 
 
 ## Whether `win` may be interacted with (resized) in the current presentation
@@ -416,6 +461,27 @@ func exit_solo() -> void:
 	# Siblings stay suspended (non-interactive) for the whole exit tween.
 	_start_transition(win, win.transform, slot_transform(_slot_of(win)),
 			win.current_solo_size, win.content_size, Presentation.EXITING)
+
+
+## Ensures the workspace is in the docked layout, awaiting a solo exit if needed.
+## The single primitive external operations use when they require docked layout.
+## Returns true once DOCKED; false when a transition is already in flight (rejected,
+## not queued — the caller retries later). Async: from SOLO it triggers exit_solo
+## and awaits solo_exited.
+func ensure_docked() -> bool:
+	match _solo_state:
+		Presentation.DOCKED:
+			return true
+		Presentation.SOLO:
+			exit_solo()
+			# Load-bearing: a zero-duration exit commits synchronously inside
+			# exit_solo and has already emitted solo_exited by now, so awaiting it
+			# unconditionally would hang forever. Only await when still EXITING.
+			if _solo_state == Presentation.EXITING:
+				await solo_exited
+			return _solo_state == Presentation.DOCKED
+		_:
+			return false
 
 
 ## Bumps the generation counter, invalidating any in-flight tween's step and
