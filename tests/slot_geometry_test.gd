@@ -125,16 +125,34 @@ func _initialize() -> void:
 	bad.gutter_angle = -0.5
 	bad.min_height = 3.0
 	bad.max_height = 3.0
-	bad.default_height = 0.05
 	bad.validate_tunables()
 	_report.check("radius clamped positive", bad.radius > 0.0, str(bad.radius))
 	_report.check("slot_angle clamped below PI/2", bad.slot_angle < PI / 2.0, str(bad.slot_angle))
 	_report.check("gutter_angle clamped non-negative", bad.gutter_angle >= 0.0,
 			str(bad.gutter_angle))
-	_report.check("heights ordered min <= default <= max",
-			bad.min_height <= bad.default_height and bad.default_height <= bad.max_height,
-			"%.3f/%.3f/%.3f" % [bad.min_height, bad.default_height, bad.max_height])
+	_report.check("heights clamped to numeric limits with min <= max",
+			bad.min_height <= bad.max_height
+			and bad.min_height >= SWindow.MIN_CONTENT_SIZE.y
+			and bad.max_height <= SWindow.MAX_CONTENT_SIZE.y,
+			"%.3f/%.3f" % [bad.min_height, bad.max_height])
 	bad.free()
+
+	# --- default size stays 16:9 ---
+	_report.section("default size holds 16:9 through clamping")
+	var ar := _manager()
+	ar.validate_tunables()
+	var ds := ar.default_size()
+	_report.near("default_size is 16:9", ds.x / ds.y, SWindow.CONTENT_ASPECT, EPS)
+	# Force a width that overflows the numeric cap; the ratio must survive the clamp.
+	ar.radius = 100.0
+	ar.default_half_width = deg_to_rad(30.0)
+	var big := ar.default_size()
+	_report.near("16:9 preserved after clamping", big.x / big.y, SWindow.CONTENT_ASPECT, EPS)
+	_report.check("clamped default within numeric limits",
+			big.x <= SWindow.MAX_CONTENT_SIZE.x + EPS
+			and big.y <= SWindow.MAX_CONTENT_SIZE.y + EPS,
+			"%.3f x %.3f" % [big.x, big.y])
+	ar.free()
 
 	_report.section("tunable validation: fit constraint only warns")
 	var loose := _manager()

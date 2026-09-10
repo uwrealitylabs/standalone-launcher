@@ -131,7 +131,7 @@ func _initialize() -> void:
 	await process_frame
 	var expected_cap := wm.width_of_beta(wm.slot_angle - wm.gutter_angle - wm.default_half_width)
 	_report.near("cap == theta - g - beta_default", wm.max_content_width_for(cw), expected_cap)
-	cw.resize(Vector2(BIG, wm.default_height))
+	cw.resize(Vector2(BIG, wm.default_size().y))
 	_report.near("resize() cannot exceed the angular cap", cw.content_size.x, expected_cap)
 	_report.check("two-widest invariant holds after a programmatic grow",
 			_two_widest_ok(wm))
