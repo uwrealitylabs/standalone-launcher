@@ -34,6 +34,13 @@ text = "Untitled"
 horizontal_alignment = 3
 vertical_alignment = 1
 
+[node name="SoloButton" type="Button" parent="HBoxContainer"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 8
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+text = "[ ]"
+
 [node name="CloseButton" type="Button" parent="HBoxContainer"]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2

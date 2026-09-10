@@ -111,6 +111,7 @@ func _create_window_now(content: PackedScene = null) -> SWindow:
 	win.manager = self
 	win.on_closed.connect(func(): _on_window_closed(win))
 	win.on_focused.connect(focus)
+	win.on_solo_requested.connect(_on_solo_requested)
 
 	$WindowLayer.add_child(win)
 	open_windows.append(win)
@@ -461,6 +462,19 @@ func exit_solo() -> void:
 	# Siblings stay suspended (non-interactive) for the whole exit tween.
 	_start_transition(win, win.transform, slot_transform(_slot_of(win)),
 			win.current_solo_size, win.content_size, Presentation.EXITING)
+
+
+## Handles a header solo-button press on `win`, guarded on the presentation state:
+## from DOCKED it solos `win`; from SOLO on the soloed window it exits; every other
+## case (a press mid-transition, or on a suspended sibling) is ignored. The lock and
+## suspension already make the buttons inert then, so this guard is a backstop.
+func _on_solo_requested(win: SWindow) -> void:
+	match _solo_state:
+		Presentation.DOCKED:
+			enter_solo(win)
+		Presentation.SOLO:
+			if win == soloed_window:
+				exit_solo()
 
 
 ## Ensures the workspace is in the docked layout, awaiting a solo exit if needed.

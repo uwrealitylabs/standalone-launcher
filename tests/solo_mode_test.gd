@@ -35,6 +35,7 @@ func _initialize() -> void:
 	await _check_gesture_cancellation()
 	await _check_resize_window_gate()
 	await _check_async_open()
+	await _check_solo_button()
 	await _check_state_machine_guards()
 	await _check_hover_affordance_safety()
 	await _check_close_mid_enter()
@@ -498,6 +499,55 @@ func _check_async_open() -> void:
 	var direct := wm._create_window_now()
 	_report.check("_create_window_now while not DOCKED returns null and stays SOLO",
 			direct == null and wm._solo_state == WindowManager.Presentation.SOLO)
+	await _free_wm(wm)
+
+
+# --- solo button wiring ----------------------------------------------------
+
+## The header's solo button reaches the manager through the full chain (button
+## pressed -> header.solo_pressed -> SWindow.on_solo_requested ->
+## WindowManager._on_solo_requested) and toggles solo, guarded on state: a press
+## enters from DOCKED and exits from SOLO on the soloed window, while a press
+## mid-transition or on a suspended sibling is ignored.
+func _check_solo_button() -> void:
+	_report.section("solo button wiring")
+	var wm := await _make_wm()
+	await _fill_left(wm)
+	var win: SWindow = wm.slots[WindowManager.Slot.RIGHT]
+	var header: SWindowHeader = win.header_3d.get_scene_instance()
+	_report.check("the header exposes a solo button", header.solo_button != null)
+
+	# DOCKED: a press solos this window.
+	wm.solo_transition_duration = 0.0
+	header.solo_button.pressed.emit()
+	_report.check("a press from DOCKED enters solo",
+			wm._solo_state == WindowManager.Presentation.SOLO and wm.soloed_window == win)
+
+	# SOLO on the soloed window: a press exits.
+	header.solo_button.pressed.emit()
+	_report.check("a press from SOLO on the soloed window exits",
+			wm._solo_state == WindowManager.Presentation.DOCKED and wm.soloed_window == null)
+
+	# Mid-transition: a press is ignored and leaves the in-flight tween alone.
+	wm.solo_transition_duration = 1.0
+	header.solo_button.pressed.emit()
+	_report.check("the press starts the enter transition",
+			wm._solo_state == WindowManager.Presentation.ENTERING)
+	wm._solo_tween.pause()
+	header.solo_button.pressed.emit()
+	_report.check("a press mid-transition is ignored",
+			wm._solo_state == WindowManager.Presentation.ENTERING and wm.soloed_window == win)
+	wm._solo_tween.custom_step(2.0)  # complete to SOLO
+	_report.check("the transition still completes to SOLO",
+			wm._solo_state == WindowManager.Presentation.SOLO)
+
+	# SOLO: a press routed from a suspended sibling is ignored.
+	var sib: SWindow = wm.slots[WindowManager.Slot.LEFT]
+	var sib_header: SWindowHeader = sib.header_3d.get_scene_instance()
+	sib_header.solo_button.pressed.emit()
+	_report.check("a press on a suspended sibling is ignored",
+			wm._solo_state == WindowManager.Presentation.SOLO and wm.soloed_window == win)
+
 	await _free_wm(wm)
 
 
