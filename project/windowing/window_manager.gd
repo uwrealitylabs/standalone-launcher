@@ -34,12 +34,15 @@ enum Presentation { DOCKED, ENTERING, SOLO, EXITING }
 @export_range(0.0, 89.0, 0.1, "radians_as_degrees") var gutter_angle := deg_to_rad(3.0)
 ## Default window angular half-width beta_default (stored in radians).
 @export_range(1.0, 89.0, 0.1, "radians_as_degrees") var default_half_width := deg_to_rad(18.0)
-@export var default_height := 0.9
+## min_height / max_height bound interactive resizing. The docked default height is
+## not tuned here: it is derived from the geometry-driven width at SWindow's content
+## aspect ratio (see default_size).
 @export var min_height := 0.2
 @export var max_height := 2.5
-## Default content size a window takes on entering solo. Device-tunable; validated
-## to lie within [MIN_CONTENT_SIZE, MAX_CONTENT_SIZE].
-@export var default_solo_size := Vector2(1.4, 0.9)
+## Solo size as a multiple of the default docked window size, so soloing always
+## enlarges relative to the docked default rather than tracking a fixed literal.
+## Device-tunable; validated to be positive.
+@export var solo_size_scale := 4.0
 ## Duration of the solo enter/exit tween, seconds. 0 runs the commit synchronously
 ## (tests / reduced motion), so the state never rests mid-transition. Device-tunable.
 @export var solo_transition_duration := 0.25
@@ -123,7 +126,7 @@ func _create_window_now(content: PackedScene = null) -> SWindow:
 	# would reject it), so it must bypass resize_window.
 	if content:
 		win.set_content(content)
-	win._apply_resize_request(Vector2(default_width(), default_height))
+	win._apply_resize_request(default_size())
 	focus(win)
 
 	return win
@@ -302,6 +305,24 @@ func default_width() -> float:
 	return 2.0 * radius * tan(default_half_width)
 
 
+## Default docked content size: a CONTENT_ASPECT rectangle whose width follows the
+## slot geometry. The numeric limit corners share that ratio, so clamping to them
+## lands on a corner and keeps the ratio even when a limit would clip one axis.
+func default_size() -> Vector2:
+	var w := default_width()
+	var target := Vector2(w, w / SWindow.CONTENT_ASPECT)
+	return target.clamp(SWindow.MIN_CONTENT_SIZE, SWindow.MAX_CONTENT_SIZE)
+
+
+## Content size a window takes on entering solo: solo_size_scale times the default
+## docked size, clamped to the numeric content limits. Those limits share the content
+## aspect ratio, so a soloed window keeps the default ratio even when scaled past one.
+var default_solo_size: Vector2:
+	get:
+		var target := solo_size_scale * default_size()
+		return target.clamp(SWindow.MIN_CONTENT_SIZE, SWindow.MAX_CONTENT_SIZE)
+
+
 ## Angular half-width a content width `w` subtends at the arc radius.
 func beta_of_width(w: float) -> float:
 	return atan(w / (2.0 * radius))
@@ -351,17 +372,13 @@ func validate_tunables() -> void:
 	var safe_max: float = SWindow.MAX_CONTENT_SIZE.y
 	min_height = clampf(min_height, safe_min, safe_max)
 	max_height = clampf(max_height, safe_min, safe_max)
-	if min_height > max_height or default_height < min_height or default_height > max_height:
-		push_error("Layout heights must satisfy min <= default <= max within the "
-				+ "numeric limits; clamping.")
-		max_height = maxf(max_height, min_height)
-		default_height = clampf(default_height, min_height, max_height)
-	var solo_clamped: Vector2 = default_solo_size.clamp(
-			SWindow.MIN_CONTENT_SIZE, SWindow.MAX_CONTENT_SIZE)
-	if not solo_clamped.is_equal_approx(default_solo_size):
-		push_error("Layout.default_solo_size must lie within the numeric content "
+	if min_height > max_height:
+		push_error("Layout heights must satisfy min <= max within the numeric "
 				+ "limits; clamping.")
-		default_solo_size = solo_clamped
+		max_height = min_height
+	if solo_size_scale <= 0.0:
+		push_error("Layout.solo_size_scale must be > 0; clamping to 1.")
+		solo_size_scale = 1.0
 	if solo_transition_duration < 0.0:
 		push_error("Layout.solo_transition_duration must be >= 0; clamping to 0.")
 		solo_transition_duration = 0.0
@@ -377,6 +394,12 @@ func validate_tunables() -> void:
 		push_warning("Default width %.3f falls outside the numeric width limits." % w_default)
 	if SWindow.MIN_CONTENT_SIZE.x > w_default:
 		push_warning("Numeric minimum width exceeds the default width.")
+	# default_solo_size fits silently in its getter; warn if solo_size_scale is
+	# large enough that the target hits the numeric limits and is capped.
+	var solo_target := solo_size_scale * default_size()
+	if not solo_target.is_equal_approx(default_solo_size):
+		push_warning("solo_size_scale %.3f drives the solo size past the numeric "
+				% solo_size_scale + "content limits; it will be capped.")
 
 
 ## The currently focused window, or null when no slot is occupied. Compatibility

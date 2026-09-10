@@ -91,8 +91,12 @@ var current_solo_size := Vector2.ZERO
 # authoritative. The resolution subsystem and the geometry helpers read this.
 var _active_size := Vector2.ZERO
 const HEADER_HEIGHT  : float = 0.08     # fixed header height in world units
-const MIN_CONTENT_SIZE := Vector2(0.4, 0.2)
-const MAX_CONTENT_SIZE := Vector2(3.0, 2.5)
+# Content aspect ratio (width:height). The min/max corners sit on this ratio, so a
+# per-axis clamp of a matching-ratio size lands on a corner without distorting it;
+# the default and solo sizes rely on that to stay 16:9 through clamping.
+const CONTENT_ASPECT := 16.0 / 9.0
+const MIN_CONTENT_SIZE := Vector2(0.4, 0.4 / CONTENT_ASPECT)
+const MAX_CONTENT_SIZE := Vector2(3.0, 3.0 / CONTENT_ASPECT)
 # Render density of each surface. Held constant across resizes so a bigger
 # window buys more room rather than bigger content.
 var PIXELS_PER_UNIT := 150.0
