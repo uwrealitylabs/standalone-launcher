@@ -12,6 +12,9 @@ class_name SWindow extends Node3D
 
 signal on_closed()
 signal on_focused(win: SWindow)
+# Raised when the header's solo button is pressed; the manager decides whether it
+# means enter or exit based on the current presentation state.
+signal on_solo_requested(win: SWindow)
 
 # The manager that owns this window's placement and size policy. Null for a
 # standalone window (e.g. a headless test fixture), which falls back to the
@@ -109,6 +112,7 @@ var _since_commit := 0.0
 func _ready() -> void:
 	var window_header: SWindowHeader = header_3d.get_scene_instance()
 	window_header.close_pressed.connect(close)
+	window_header.solo_pressed.connect(func(): on_solo_requested.emit(self))
 
 	set_content(content)
 	set_input_enabled(false)
