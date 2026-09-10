@@ -117,10 +117,10 @@ func _create_window_now(content: PackedScene = null) -> SWindow:
 	open_windows.append(win)
 	_assign_slot(win, slot)
 
-	# Install content before the initial focus so the content scene receives its
-	# first on_window_focus_changed callback. Size through the internal policy, not
-	# resize(): the fresh window is not interactive yet (its slot is assigned but
-	# the interaction gate would reject it), so it must bypass resize_window.
+	# Install content before the initial focus so the focus handoff applies to a
+	# populated scene. Size through the internal policy, not resize(): the fresh
+	# window is not interactive yet (its slot is assigned but the interaction gate
+	# would reject it), so it must bypass resize_window.
 	if content:
 		win.set_content(content)
 	win._apply_resize_request(Vector2(default_width(), default_height))
