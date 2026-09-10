@@ -10,11 +10,11 @@ class_name SWindow extends Node3D
 @export var header_3d: XRToolsViewport2DIn3D
 @export var content_3d: XRToolsViewport2DIn3D
 
-signal on_closed()
-signal on_focused(win: SWindow)
+signal closed()
+signal focused(win: SWindow)
 # Raised when the header's solo button is pressed; the manager decides whether it
 # means enter or exit based on the current presentation state.
-signal on_solo_requested(win: SWindow)
+signal solo_requested(win: SWindow)
 
 # The manager that owns this window's placement and size policy. Null for a
 # standalone window (e.g. a headless test fixture), which falls back to the
@@ -112,7 +112,7 @@ var _since_commit := 0.0
 func _ready() -> void:
 	var window_header: SWindowHeader = header_3d.get_scene_instance()
 	window_header.close_pressed.connect(close)
-	window_header.solo_pressed.connect(func(): on_solo_requested.emit(self))
+	window_header.solo_pressed.connect(func(): solo_requested.emit(self))
 
 	set_content(content)
 	set_input_enabled(false)
@@ -165,7 +165,7 @@ func set_content(new_content: PackedScene) -> void:
 
 ## Requests focus for this window; the window manager performs the reorder.
 func focus() -> void:
-	on_focused.emit(self)
+	focused.emit(self)
 
 
 ## Routes or unroutes physical keyboard/gamepad input to this window's surfaces.
@@ -706,10 +706,10 @@ func _set_handle_hovered(handle_id: String, pointer: Node3D, hovered: bool) -> v
 		group.visible = not hovers.is_empty()
 
 
-## Closes the window: emits on_closed and frees the node.
+## Closes the window: emits closed and frees the node.
 func close() -> void:
 	# Cancel any in-flight resize so a missed RELEASED can't leave stale state
 	_resizing = false
 	_update_processing()
-	on_closed.emit()
+	closed.emit()
 	queue_free()
