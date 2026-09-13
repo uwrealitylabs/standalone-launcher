@@ -664,4 +664,9 @@ func _ready() -> void:
 	create_window(load("res://project/launch_service/application_menu.tscn"))
 	create_window(load("res://project/shell/terminal_ui.tscn"))
 
+	# TEMP: a third placeholder window in LEFT for eyeballing a full three-slot
+	# layout. Skipped headless so the suites keep their two-window startup.
+	if DisplayServer.get_name() != "headless":
+		create_window(load("res://project/windowing/window_placeholder_content.tscn"))
+
 	create_keyboard()
