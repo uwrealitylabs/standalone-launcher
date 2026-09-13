@@ -86,9 +86,10 @@ var content_size := Vector2(1.5, 0.75)
 # `manager.soloed_window` (manager state ENTERING/SOLO/EXITING); reset to
 # Vector2.ZERO after exit completes.
 var current_solo_size := Vector2.ZERO
-# The size the geometry currently reflects — the argument of the last _apply_size,
-# independent of which persistent field (content_size / current_solo_size) is
-# authoritative. The resolution subsystem and the geometry helpers read this.
+# The size the geometry currently reflects — the argument of the last
+# _apply_presented_geometry, independent of which persistent field (content_size /
+# current_solo_size) is authoritative. The resolution subsystem and the geometry
+# helpers read this.
 var _active_size := Vector2.ZERO
 const HEADER_HEIGHT  : float = 0.08     # fixed header height in world units
 # Content aspect ratio (width:height). The min/max corners sit on this ratio, so a
@@ -136,7 +137,7 @@ func _ready() -> void:
 		content_3d.set_process_input(false)
 	_build_resize_handles()
 	_build_resize_affordances()
-	_apply_size(content_size)
+	_apply_presented_geometry(content_size)
 
 
 ## Focuses the window on any press, whichever surface the pointer hit.
@@ -312,8 +313,20 @@ func _live_resize_plane() -> Plane:
 	return Plane(xf.basis.z, xf.origin)
 
 
+# --- Resize entry points ---------------------------------------------------
+# Two kinds of caller reach the resize policy:
+#   * Hand-gesture path: start_resize / update_resize / stop_resize /
+#     cancel_resize, driven frame by frame from _on_handle_pointer_event as the
+#     user drags a handle.
+#   * Programmatic path: resize -> WindowManager.resize_window ->
+#     _commit_requested_size, called by solo logic and window creation, with no
+#     hand involved (the tween also calls _apply_presented_geometry directly).
+# Both converge on _commit_requested_size (clamp policy + authoritative size
+# field) and then _apply_presented_geometry (paint the geometry).
+
 ## Starts a resize on `handle` ("L", "R", "B", "BL" or "BR") from the grab
 ## described by `event`. No-op when the pointer ray misses the window's plane.
+## Hand-gesture entry, from _on_handle_pointer_event.
 func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 	# Focus, then anchor the grab in the window's own frame (to_local) so later
 	# frames can re-measure against the live window.
@@ -342,6 +355,7 @@ func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
 
 ## Resizes the window to follow the pointer at `hit_world`, keeping the content
 ## centre fixed and growing symmetrically. No-op when no resize is in flight.
+## Hand-gesture entry, from _on_handle_pointer_event.
 func update_resize(hit_world: Vector3) -> void:
 	if not _resizing:
 		return
@@ -369,38 +383,42 @@ func update_resize(hit_world: Vector3) -> void:
 			dw = -2.0 * dx
 			dh = -2.0 * dy
 
-	_apply_resize_request(_resize_start_size + Vector2(dw, dh), true)
+	_commit_requested_size(_resize_start_size + Vector2(dw, dh), true)
 
 
-## Cancels any in-flight resize gesture: ends it, releases resize ownership,
-## resets the frozen width cap, settles the geometry at the current presentation
-## size, and clears gesture state so no later pointer frame can resume the old
-## drag. Does not revert the size already applied. No-op when not resizing.
-func cancel_resize() -> void:
-	if not _resizing:
-		return
-	_resizing           = false
-	_resize_handle      = ""
-	_resize_start_local = Vector3.ZERO
-	_resize_start_size  = Vector2.ZERO
-	_resize_max_width   = MAX_CONTENT_SIZE.x
-	if manager:
-		manager.release_resize(self)
-	_update_processing()
-	_apply_size(_presentation_size())
-
-
-## Ends the resize and settles the render resolutions at the final size.
-func stop_resize() -> void:
+## Shared resize teardown: drops the resize flag and handle, releases resize
+## ownership, updates the process gate, and settles the geometry at the current
+## presentation size (whatever the live-resize throttle last committed). Both the
+## gesture stop and the cancel path run this; cancel layers its own extra state
+## resets on top. The affordance mark is driven purely by hover, so it is left
+## as-is — still shown if the ray is on the handle, cleared later by the handle's
+## own EXITED.
+func _end_resize() -> void:
 	_resizing      = false
-	# The mark is driven purely by hover, so it is left as-is here: still shown if
-	# the ray is on the handle, and cleared later by the handle's own EXITED.
 	_resize_handle = ""
 	if manager:
 		manager.release_resize(self)
 	_update_processing()
-	# Gesture over: settle exactly, whatever the throttle last committed
-	_apply_size(_presentation_size())
+	_apply_presented_geometry(_presentation_size())
+
+
+## Cancels any in-flight resize gesture: runs the shared teardown, then also
+## clears the grab anchor and frozen width cap so no later pointer frame can
+## resume the old drag. Does not revert the size already applied. No-op when not
+## resizing. Hand-gesture entry, from _on_handle_pointer_event.
+func cancel_resize() -> void:
+	if not _resizing:
+		return
+	_end_resize()
+	_resize_start_local = Vector3.ZERO
+	_resize_start_size  = Vector2.ZERO
+	_resize_max_width   = MAX_CONTENT_SIZE.x
+
+
+## Ends the resize and settles the render resolutions at the final size.
+## Hand-gesture entry, from _on_handle_pointer_event.
+func stop_resize() -> void:
+	_end_resize()
 
 
 ## Public programmatic resize entry to `desired`. Existing callers (tests, window
@@ -408,14 +426,14 @@ func stop_resize() -> void:
 ## it inherits the state gate and the unconditional gesture cancel; unmanaged (a
 ## headless fixture) it falls back to the numeric clamp. Not on the gesture path —
 ## update_resize calls the internal policy directly, so this wrapper's cancel is
-## safe. `live` applies only to the unmanaged fallback; the managed path always
-## settles (a programmatic resize is not a drag frame).
-func resize(desired: Vector2, live: bool = false) -> void:
+## safe. Always settles the render resolutions: a programmatic resize is not a
+## drag frame.
+func resize(desired: Vector2) -> void:
 	if manager:
 		manager.resize_window(self, desired)
 	else:
 		content_size = desired.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
-		_apply_size(content_size, live)
+		_apply_presented_geometry(content_size)
 
 
 ## The size this window currently presents at: its live solo size while it is the
@@ -427,31 +445,32 @@ func _presentation_size() -> Vector2:
 	return content_size
 
 
-## Internal resize policy: clamps `desired` for the current presentation mode,
-## writes the owning size field, and applies the geometry. Gesture frames and the
-## programmatic resize path call this; it is not the public entry. `live` omits
-## the render resolutions, as in [method _apply_size].
-func _apply_resize_request(desired: Vector2, live: bool = false) -> void:
+## Resize policy layer: clamps `desired` for the current presentation mode and
+## writes the authoritative size field (current_solo_size or content_size), then
+## paints it. This is the layer that DECIDES the size; callers on both the gesture
+## and programmatic paths reach it, but it is not the public entry. `live` omits
+## the render resolutions, as in [method _apply_presented_geometry].
+func _commit_requested_size(desired: Vector2, live: bool = false) -> void:
 	if manager and manager.soloed_window == self:
 		# Solo path: clamp to solo safety limits and write the live solo size only.
 		current_solo_size = manager.clamp_solo_size(self, desired)
-		_apply_size(current_solo_size, live)
+		_apply_presented_geometry(current_solo_size, live)
 	elif manager:
 		content_size = manager.clamp_content_size(self, desired)
-		_apply_size(content_size, live)
+		_apply_presented_geometry(content_size, live)
 	else:
 		# Standalone window (e.g. a headless test fixture): numeric clamp only.
 		content_size = desired.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
-		_apply_size(content_size, live)
+		_apply_presented_geometry(content_size, live)
 
 
-## Mode-independent geometry writer: drives the quad, collision, header
-## placement, resize handles and affordances from `size`, and records it as
-## [member _active_size] for the resolution subsystem. It does NOT decide or write
-## which persistent size field is authoritative — the caller owns that write. It
-## does not re-clamp; callers pass an already-clamped size. `live` omits the
+## Geometry layer: drives the quad, collision, header placement, resize handles
+## and affordances from `size`, and records it as [member _active_size] for the
+## resolution subsystem. It only PAINTS geometry — it does NOT decide or write
+## which persistent size field is authoritative (the caller owns that write) and
+## it does not re-clamp; callers pass an already-clamped size. `live` omits the
 ## render resolutions; the caller must call again without it to settle them.
-func _apply_size(size: Vector2, live: bool = false) -> void:
+func _apply_presented_geometry(size: Vector2, live: bool = false) -> void:
 	_active_size = size
 	var header_size := Vector2(size.x, HEADER_HEIGHT)
 

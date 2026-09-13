@@ -121,12 +121,12 @@ func _create_window_now(content: PackedScene = null) -> SWindow:
 	_assign_slot(win, slot)
 
 	# Install content before the initial focus so the focus handoff applies to a
-	# populated scene. Size through the internal policy, not resize(): the fresh
-	# window is not interactive yet (its slot is assigned but the interaction gate
-	# would reject it), so it must bypass resize_window.
+	# populated scene. Size through the internal policy directly: creation already
+	# cleared any active resize above and holds no gesture, so routing through the
+	# public resize_window would only re-run the state gate and cancel for nothing.
 	if content:
 		win.set_content(content)
-	win._apply_resize_request(default_size())
+	win._commit_requested_size(default_size())
 	focus(win)
 
 	return win
@@ -256,7 +256,7 @@ func resize_window(win: SWindow, desired: Vector2) -> void:
 	if not can_interact(win):
 		return
 	cancel_active_resize()
-	win._apply_resize_request(desired)
+	win._commit_requested_size(desired)
 
 
 ## Whether `win` may be interacted with (resized) in the current presentation
@@ -561,7 +561,7 @@ func _solo_step(t: float, tok: int, win: SWindow, start_xf: Transform3D,
 		return
 	win.transform = start_xf.interpolate_with(target_xf, t)
 	win.current_solo_size = from_size.lerp(to_size, t)
-	win._apply_size(win.current_solo_size, true)
+	win._apply_presented_geometry(win.current_solo_size, true)
 
 
 ## Snaps a transition to its exact target and settles the docked/solo state.
@@ -574,7 +574,7 @@ func _commit_transition(tok: int, win: SWindow, target_xf: Transform3D,
 		return
 	win.transform = target_xf
 	win.current_solo_size = final_size
-	win._apply_size(final_size, false)
+	win._apply_presented_geometry(final_size, false)
 	win.set_transitioning(false)
 	_solo_tween = null
 	if phase == Presentation.ENTERING:

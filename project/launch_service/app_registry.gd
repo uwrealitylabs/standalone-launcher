@@ -115,6 +115,9 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	# Make the whole panel clickable
 	var button = Button.new()
 	button.flat = true  # make an Invisible button over the panel
+	# Left focusable on purpose: FOCUS_NONE removes all hover/press feedback on the
+	# row, so pressing a row keeps keyboard focus. Resuming type-to-filter then costs
+	# one extra click on the search bar — an acceptable trade for visible feedback.
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	button.pressed.connect(_on_app_button_pressed.bind(app_data, app_name))

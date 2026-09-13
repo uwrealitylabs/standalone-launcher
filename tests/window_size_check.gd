@@ -1,6 +1,7 @@
 extends SceneTree
 
-## Verifies that SWindow._apply_size keeps every size-dependent part in sync.
+## Verifies that SWindow._apply_presented_geometry keeps every size-dependent part
+## in sync.
 ##
 ## Runs the window in a live tree so _ready and the resize gesture path both
 ## execute.
