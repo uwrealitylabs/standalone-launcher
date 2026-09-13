@@ -108,8 +108,10 @@ func _on_pointer_event(event : XRToolsPointerEvent) -> void:
 
 	# If the current mouse isn't pressed then consider switching to a new one
 	if not _presses.has(_mouse):
-		if type == XRToolsPointerEvent.Type.PRESSED and pointer is XRToolsFunctionPointer:
-			# Switch to pressed laser-pointer
+		if type == XRToolsPointerEvent.Type.PRESSED \
+				and pointer != null \
+				and XRTools.is_xr_class(pointer, "XRToolsFunctionPointer"):
+			# Switch to the pressed mouse-capable ray pointer
 			_mouse = pointer
 		elif type == XRToolsPointerEvent.Type.EXITED and pointer == _mouse:
 			# Current mouse leaving, switch to dominant

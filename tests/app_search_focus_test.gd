@@ -104,6 +104,25 @@ func _press_physical(win: SWindow, keycode: Key) -> void:
 	win.send_input(event)
 
 
+## Maps a point in the content SubViewport back onto its 3D input surface.
+func _viewport_to_world(surface: XRToolsViewport2DIn3D, point: Vector2) -> Vector3:
+	var shape := surface.get_node("StaticBody3D/CollisionShape3D") as CollisionShape3D
+	var local := Vector3(
+			(point.x / surface.viewport_size.x - 0.5) * surface.screen_size.x,
+			(0.5 - point.y / surface.viewport_size.y) * surface.screen_size.y,
+			0.0)
+	return shape.global_transform * local
+
+
+## Sends the same typed pointer event that HandPointer emits on the headset.
+func _send_hand_event(
+		body: Node3D,
+		pointer: HandPointer,
+		type: XRToolsPointerEvent.Type,
+		at: Vector3) -> void:
+	body.emit_signal("pointer_event", XRToolsPointerEvent.new(type, pointer, body, at, at))
+
+
 ## Writes one .desktop file per name in APPS and points SHARE_DIR_ENV at the
 ## tree holding them. Must run before the manager is built, since the menu scans
 ## on _ready.
@@ -255,6 +274,30 @@ func _initialize() -> void:
 	await process_frame
 	_report.check("re-focusing the window leaves the search bar unfocused",
 			not menu.search_bar.has_focus())
+
+	_report.section("a hand click recovers from stale pre-solo pointer ownership")
+	var body := menu_window.content_3d.get_node("StaticBody3D") as Node3D
+	var stale_pointer := HandPointer.new()
+	var clicking_pointer := HandPointer.new()
+	var search_center: Vector2 = menu.search_bar.get_global_rect().get_center()
+	var search_at := _viewport_to_world(menu_window.content_3d, search_center)
+	_send_hand_event(body, stale_pointer, XRToolsPointerEvent.Type.ENTERED, search_at)
+	wm.solo_transition_duration = 0.0
+	wm.enter_solo(menu_window)
+	wm.exit_solo()
+	_report.check("the disabled collider can leave the old hand as mouse owner",
+			body.get("_mouse") == stale_pointer)
+	_send_hand_event(body, clicking_pointer, XRToolsPointerEvent.Type.PRESSED, search_at)
+	await process_frame
+	_report.check("the pressing hand takes mouse ownership",
+			body.get("_mouse") == clicking_pointer)
+	_report.check("the synthesized mouse press focuses the search bar",
+			menu.search_bar.has_focus())
+	_send_hand_event(body, clicking_pointer, XRToolsPointerEvent.Type.RELEASED, search_at)
+	_send_hand_event(body, clicking_pointer, XRToolsPointerEvent.Type.EXITED, search_at)
+	_send_hand_event(body, stale_pointer, XRToolsPointerEvent.Type.EXITED, search_at)
+	stale_pointer.free()
+	clicking_pointer.free()
 
 	_remove_tree(_fixture_dir)
 	OS.unset_environment(FileUtils.SHARE_DIR_ENV)

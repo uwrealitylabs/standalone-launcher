@@ -35,6 +35,11 @@ var _ray_mesh: MeshInstance3D = null
 var _cursor_dot: MeshInstance3D = null
 
 
+## Identifies this controller-mounted ray as mouse-capable to XR Tools viewports.
+func is_xr_class(xr_name: String) -> bool:
+	return xr_name == "XRToolsFunctionPointer"
+
+
 func _ready():
 	_raycast = get_parent().get_node_or_null("RayCast3D")
 	if not _raycast:
