@@ -7,7 +7,8 @@ tests.
 
 ## godot-xr-tools
 
-**Upstream baseline: `571a45f` = Godot XR Tools 4.5.0 (upstream `90495f1`).**
+**Upstream baseline:** our commit `571a45f` imported the addon at Godot XR Tools
+release **4.5.0** (that release's own commit in the upstream repo is `90495f1`).
 That import commit matches the official 4.5.0 release for all 470 authored
 source, scene, resource, doc, and binary-asset files (release ZIP verified
 against GitHub's published SHA-256). The only non-authored difference is
