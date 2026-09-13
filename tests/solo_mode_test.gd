@@ -30,6 +30,7 @@ var _report := Report.new()
 
 func _initialize() -> void:
 	await _check_enter_layout()
+	await _check_solo_no_siblings()
 	await _check_focus_and_suspension()
 	await _check_tween_safety()
 	await _check_gesture_cancellation()
@@ -40,6 +41,9 @@ func _initialize() -> void:
 	await _check_hover_affordance_safety()
 	await _check_close_mid_enter()
 	await _check_close_mid_exit()
+	await _check_close_soloed_at_rest()
+	await _check_close_soloed_sole_window()
+	await _check_close_suspended_sibling()
 	await _check_contract_preservation()
 	_report.finish(self)
 
@@ -60,6 +64,15 @@ func _fill_left(wm: WindowManager) -> SWindow:
 	var w := wm.create_window()
 	await process_frame
 	return w
+
+
+## A fresh manager reduced to a single open window (the terminal in RIGHT): the
+## menu is closed so the survivor has no sibling. One frame processed.
+func _make_wm_single() -> WindowManager:
+	var wm := await _make_wm()
+	wm.slots[WindowManager.Slot.CENTRE].close()  # close the menu; terminal survives
+	await process_frame
+	return wm
 
 
 func _free_wm(wm: WindowManager) -> void:
@@ -150,6 +163,41 @@ func _check_enter_layout() -> void:
 	_report.check("re-entering re-inits from default_solo_size",
 			win.current_solo_size.is_equal_approx(wm.default_solo_size),
 			str(win.current_solo_size))
+
+	await _free_wm(wm)
+
+
+# --- solo with no siblings -------------------------------------------------
+
+## Soloing the sole open window (no siblings to suspend) enters and exits cleanly:
+## it moves to the CENTRE transform at default_solo_size, and exit restores its own
+## slot and geometry, keeping focus on it throughout.
+func _check_solo_no_siblings() -> void:
+	_report.section("solo with no siblings")
+	var wm := await _make_wm_single()
+	var win: SWindow = wm.slots[WindowManager.Slot.RIGHT]
+	var own_slot := wm.slot_transform(WindowManager.Slot.RIGHT)
+	_report.check("exactly one window open", wm.open_windows.size() == 1,
+			str(wm.open_windows.size()))
+
+	wm.solo_transition_duration = 0.0
+	wm.enter_solo(win)
+	_report.check("enter reaches SOLO on the sole window",
+			wm._solo_state == WindowManager.Presentation.SOLO and wm.soloed_window == win)
+	_report.check("the sole window sits at the CENTRE transform",
+			win.transform.is_equal_approx(wm.slot_transform(WindowManager.Slot.CENTRE)))
+	_report.check("solo size settles at default_solo_size",
+			win.current_solo_size.is_equal_approx(wm.clamp_solo_size(win, wm.default_solo_size)),
+			str(win.current_solo_size))
+	_report.check("focus stays on the sole window", wm.focused_window == win)
+
+	wm.exit_solo()
+	_report.check("exit returns to DOCKED",
+			wm._solo_state == WindowManager.Presentation.DOCKED and wm.soloed_window == null)
+	_report.check("exit discards the solo size", win.current_solo_size == Vector2.ZERO)
+	_report.check("exit restores the window's own slot transform",
+			win.transform.is_equal_approx(own_slot))
+	_report.check("focus still on the sole window after exit", wm.focused_window == win)
 
 	await _free_wm(wm)
 
@@ -717,6 +765,116 @@ func _check_close_mid_exit() -> void:
 	await create_timer(1.2).timeout
 	_report.check("no duplicate solo_exited after the original duration",
 			exits[0] == 1, str(exits[0]))
+
+	await _free_wm(wm)
+
+
+# --- close while resting in SOLO -------------------------------------------
+
+## Closing the soloed window while RESTING in SOLO (no tween in flight) tears the
+## presentation down cleanly: returns to DOCKED, reactivates the sibling, promotes
+## focus onto it, and emits solo_exited exactly once.
+func _check_close_soloed_at_rest() -> void:
+	_report.section("close soloed window at rest")
+	var wm := await _make_wm()  # menu CENTRE, terminal RIGHT
+	var RIGHT := WindowManager.Slot.RIGHT
+
+	var win: SWindow = wm.slots[RIGHT]
+	var sibling: SWindow = wm.slots[WindowManager.Slot.CENTRE]
+
+	wm.solo_transition_duration = 0.0
+	wm.enter_solo(win)
+	_report.check("resting in SOLO with no live tween",
+			wm._solo_state == WindowManager.Presentation.SOLO and wm._solo_tween == null)
+	_report.check("the sibling is suspended", sibling.is_suspended)
+
+	var exits := [0]
+	wm.solo_exited.connect(func(): exits[0] += 1)
+	win.close()
+	await process_frame
+
+	_report.check("close returns to DOCKED",
+			wm._solo_state == WindowManager.Presentation.DOCKED)
+	_report.check("close clears soloed_window", wm.soloed_window == null)
+	_report.check("the sibling is reactivated", not sibling.is_suspended)
+	_report.check("focus promoted onto the sibling", wm.focused_window == sibling)
+	_report.check("the closed window left the open list", win not in wm.open_windows)
+	_report.check("close emits solo_exited exactly once", exits[0] == 1, str(exits[0]))
+
+	await _free_wm(wm)
+
+
+## Closing the soloed window when it is the SOLE open window leaves an empty
+## workspace: DOCKED with no soloed window, every slot and the focus history empty,
+## null focus, and exactly one solo_exited.
+func _check_close_soloed_sole_window() -> void:
+	_report.section("close soloed sole window -> empty")
+	var wm := await _make_wm_single()
+	var win: SWindow = wm.slots[WindowManager.Slot.RIGHT]
+
+	wm.solo_transition_duration = 0.0
+	wm.enter_solo(win)
+	var exits := [0]
+	wm.solo_exited.connect(func(): exits[0] += 1)
+	win.close()
+	await process_frame
+
+	_report.check("close returns to DOCKED",
+			wm._solo_state == WindowManager.Presentation.DOCKED)
+	_report.check("close clears soloed_window", wm.soloed_window == null)
+	_report.check("the workspace is empty", wm.open_windows.is_empty(),
+			str(wm.open_windows.size()))
+	_report.check("every slot is empty",
+			wm.slots[0] == null and wm.slots[1] == null and wm.slots[2] == null)
+	_report.check("focus is null", wm.focused_window == null)
+	_report.check("focus history is empty", wm.focus_history.is_empty(),
+			str(wm.focus_history.size()))
+	_report.check("close emits solo_exited exactly once", exits[0] == 1, str(exits[0]))
+
+	await _free_wm(wm)
+
+
+## Closing a SUSPENDED sibling (not the soloed window) leaves the solo presentation
+## intact: still SOLO on the same window, focus unmoved, other siblings still
+## suspended, the closed slot vacated, and no solo_exited fired.
+func _check_close_suspended_sibling() -> void:
+	_report.section("close suspended sibling while soloed")
+	var wm := await _make_wm()
+	await _fill_left(wm)  # all three slots occupied
+	var CENTRE := WindowManager.Slot.CENTRE
+	var RIGHT := WindowManager.Slot.RIGHT
+	var LEFT := WindowManager.Slot.LEFT
+
+	var win: SWindow = wm.slots[RIGHT]
+	var closing: SWindow = wm.slots[CENTRE]
+	var other: SWindow = wm.slots[LEFT]
+
+	wm.solo_transition_duration = 0.0
+	wm.enter_solo(win)
+	_report.check("resting in SOLO on the RIGHT window",
+			wm._solo_state == WindowManager.Presentation.SOLO and wm.soloed_window == win)
+	_report.check("both siblings are suspended", closing.is_suspended and other.is_suspended)
+
+	var exits := [0]
+	wm.solo_exited.connect(func(): exits[0] += 1)
+	wm.destroy_window(closing)
+	await process_frame
+
+	_report.check("still SOLO after closing a suspended sibling",
+			wm._solo_state == WindowManager.Presentation.SOLO)
+	_report.check("soloed_window is unchanged", wm.soloed_window == win)
+	_report.check("focus stays on the soloed window", wm.focused_window == win)
+	_report.check("the other sibling is still suspended", other.is_suspended)
+	_report.check("the closed sibling left the open list", closing not in wm.open_windows)
+	_report.check("the closed sibling's slot (CENTRE) is vacated", wm.slots[CENTRE] == null)
+	_report.check("no solo_exited fired", exits[0] == 0, str(exits[0]))
+
+	# Exiting normally reactivates the surviving sibling.
+	wm.exit_solo()
+	_report.check("exit reaches DOCKED",
+			wm._solo_state == WindowManager.Presentation.DOCKED)
+	_report.check("the surviving sibling reactivates", not other.is_suspended)
+	_report.check("exactly one solo_exited total", exits[0] == 1, str(exits[0]))
 
 	await _free_wm(wm)
 

@@ -154,4 +154,23 @@ func _initialize() -> void:
 			wm.slots[LEFT] == w3 and w3.transform.is_equal_approx(xf_before[w3]))
 	_report.check("the survivor was not resized", w3.content_size == w3_size)
 
+	# --- emptying the workspace, then reopening ------------------------------
+	# Closing the last windows leaves an empty workspace: every slot free, null
+	# focus, empty history. A fresh open then starts the fill order over at CENTRE.
+	_report.section("empty the workspace, then reopen")
+	for w in wm.open_windows.duplicate():
+		w.close()
+	await process_frame
+	_report.check("the workspace is empty", wm.open_windows.is_empty(),
+			str(wm.open_windows.size()))
+	_report.check("every slot is free",
+			wm.slots[LEFT] == null and wm.slots[CENTRE] == null and wm.slots[RIGHT] == null)
+	_report.check("focus is null", wm.focused_window == null)
+	_report.check("the focus history is empty", wm.focus_history.is_empty(),
+			str(wm.focus_history.size()))
+	var reopened := wm.create_window()
+	await process_frame
+	_report.check("reopening fills CENTRE first", wm.slots[CENTRE] == reopened)
+	_report.check("the reopened window is focused", wm.focused_window == reopened)
+
 	_report.finish(self)
