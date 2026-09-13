@@ -344,8 +344,10 @@ func width_of_beta(beta: float) -> float:
 ## slot permutation: beta_i + beta_other + gutter <= theta against the widest OTHER
 ## open window, never counting one narrower than a default. Scans open_windows so a
 ## removal exposing a new leader is caught (stashed windows count too). Returns the
-## numeric width limit when the angular bound is looser; deliberately not floored to
-## the numeric minimum, which startup validation already guarantees is legal.
+## numeric width limit when the angular bound is looser. Floored to the numeric
+## minimum: tight tunables can drive the angular cap below (even past zero), and
+## validate_tunables only warns about that rather than clamping, so an unfloored cap
+## would hand clamp_content_size an inverted [min, max] range.
 func max_content_width_for(win: SWindow) -> float:
 	var largest_other := default_half_width
 	for other in open_windows:
@@ -353,7 +355,8 @@ func max_content_width_for(win: SWindow) -> float:
 			continue
 		largest_other = maxf(largest_other, beta_of_width(other.content_size.x))
 	var beta_max := slot_angle - gutter_angle - largest_other
-	return minf(SWindow.MAX_CONTENT_SIZE.x, width_of_beta(beta_max))
+	return clampf(width_of_beta(beta_max),
+			SWindow.MIN_CONTENT_SIZE.x, SWindow.MAX_CONTENT_SIZE.x)
 
 
 ## Checks the Layout tunables, split by severity so a bad tune degrades rather
