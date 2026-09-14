@@ -1,7 +1,7 @@
 # Wayland applications as spatial windows: Phase 0 architecture decision
 
 - **Status:** Provisional go
-- **Follow-up:** `[Compositor 1] Display one Wayland application in Godot`
+- **Follow-up:** `[Compositor 0] Display one Wayland application in Godot`
 - **Target:** Godot 4.5, OpenXR, arm64 Linux on the RB 5
 - **Last updated:** 2026-09-02
 

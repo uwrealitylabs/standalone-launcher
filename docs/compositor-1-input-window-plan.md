@@ -1,13 +1,13 @@
 # Implementation plan — Compositor 1: interactive Wayland window in the launcher
 
 - **Status:** Draft
-- **Predecessor:** Phase 0 (`docs/wayland-surfaces-phase-0.md`) — one-way display proven.
+- **Predecessor:** Compositor 0 (`docs/wayland-surfaces-phase-0.md`) — one-way display proven.
 - **Target:** Godot 4.5, OpenXR, arm64 Linux on the RB 5.
 - **Branch:** `feat/compositor-1-input`, cut from `spike/xr-compositor-poc` (#27).
 
 ## Context
 
-Phase 0 proved one direction: a single `wl_shm` client's pixels reach a fixed quad,
+Compositor 0 proved one direction: a single `wl_shm` client's pixels reach a fixed quad,
 converted correctly, at a cheap per-frame CPU cost. It deliberately implemented **no
 input**, no resize, no popups, and **no `SWindow` integration** — the surface is a bare
 `MeshInstance3D`, not a launcher window.
@@ -25,7 +25,7 @@ buffers (Compositor 3), both out of scope here.
 ### This work does not depend on the windowing effort
 
 Compositor 1 introduces **no dependency on future windowing work**. Milestones 1–4 (below)
-— bridge seat, translation, ray pointer, keyboard — depend only on the Phase-0 spike
+— bridge seat, translation, ray pointer, keyboard — depend only on the Compositor 0 spike
 (#27) and need nothing from the window-layout code at all. Only the final slice,
 Milestone 5 (below), touches windowing, and even it depends only on **already-built**
 window-layout work:
@@ -72,7 +72,7 @@ validation.
 - `native/tests/`, `tests/` — C input client and GDScript mapping/gating tests.
 
 The bridge stays the only place wlroots types exist, and every call stays on Godot's main
-thread (the Phase-0 threading contract is unchanged: `wl_shm` access is not thread-safe).
+thread (the Compositor 0 threading contract is unchanged: `wl_shm` access is not thread-safe).
 
 ---
 
@@ -98,7 +98,7 @@ void wlb_keyboard_modifiers(wlb_server *s, uint32_t depressed,
 ```
 
 **Verifiable off the board (Linux arm64):** `weston-terminal` receives motion/click (text selection moves)
-and keystrokes (they echo). Risk: `weston-terminal` may bind globals Phase 0 does not
+and keystrokes (they echo). Risk: `weston-terminal` may bind globals Compositor 0 does not
 serve (`wl_output`, `wl_data_device_manager`). Serve minimal stubs, or fall back to a tiny
 purpose-built client in `native/tests` if a stub is more work than it earns.
 
@@ -115,7 +115,7 @@ send_key(Key godot_key, pressed)
 
 Map Godot keycodes → **Linux evdev keycodes** (xkb = evdev + 8). This is the classic
 gotcha; drive it from a table and unit-test it (see Tests, below). Accept surfaces at
-scale 1 and normal transform only, matching Phase 0.
+scale 1 and normal transform only, matching Compositor 0.
 
 ## 3. Pointer from the XR ray (`compositor_poc.gd`, bare quad)
 
