@@ -56,7 +56,11 @@ sources = Glob("src/*.cpp")
 # The bridge is C, not C++. Built as its own object list so the C++ flags
 # godot-cpp sets (-std=c++17 and friends) never reach it.
 c_env = env.Clone()
-c_env.Append(CFLAGS=["-std=c11"])
+# -ftree-vectorize turns on gcc's loop vectorizer at -O2, where it is otherwise
+# off, so the pixel swizzle in pixel_convert.c gets NEON ld4/st4 in the -O2
+# template_debug build (on by default at -O3, ignored at -O0). The -O level is
+# godot-cpp's, inherited via env.Clone() per target -- not set here.
+c_env.Append(CFLAGS=["-std=c11", "-ftree-vectorize"])
 c_objects = [c_env.SharedObject(f) for f in Glob("bridge/*.c")]
 
 lib_name = "libwl_compositor{}{}".format(env["suffix"], env["SHLIBSUFFIX"])
