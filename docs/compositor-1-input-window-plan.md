@@ -65,8 +65,8 @@ additional local composition with `feat/spatial-window-layout-phase1` to verify 
 gate is reused, but keep #29 out of the integration branch ancestry. Nothing here needs a
 future windowing phase (taskbar/stashing or slot reordering). If #28 reaches `main` first,
 base the integration branch on that updated `main` instead. Once the core branch and #28
-have landed, rebase the integration branch onto `main`; its review diff then contains M5
-only.
+have landed, rebase the integration branch onto `main`; its review diff then contains M3 and
+M5 only.
 
 ## Scope
 
