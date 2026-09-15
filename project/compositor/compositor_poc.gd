@@ -6,9 +6,11 @@ extends MeshInstance3D
 ## [WaylandCompositor] owns polling and the texture. Splitting process ownership
 ## across the GDScript/C++ boundary is how children get double-reaped or leaked.
 ##
-## Deliberately not an [SWindow]: that class drives an [XRToolsViewport2DIn3D] and
-## [SubViewport], which a compositor-owned texture doesn't fit. Input, resizing,
-## focus and multi-window support are out of scope.
+## Deliberately not an [SWindow]: that class drives an [XRToolsViewport2DIn3D]
+## and a [SubViewport], neither of which a compositor-owned texture fits.
+## Resizing, pointer input and multi-window support are all out of scope; the
+## single surface takes keyboard focus while it is mapped and routes key events
+## to it (see [method attach_virtual_keyboard] and [method _unhandled_key_input]).
 ##
 ## Authored hidden, showing itself only once a real client frame is bound, so a
 ## host with no GDExtension (every macOS and x86_64 machine) renders nothing rather
@@ -33,11 +35,23 @@ const QUAD_HEIGHT := 0.6
 ## can `await` it to sequence its own quit. See [method request_shutdown].
 signal shutdown_finished
 
+## Whether to bring the server and client up automatically on entering the tree.
+## Left on for the standalone scene; a host that starts the surface on its own
+## terms — or a test driving the node with its own compositor — turns it off, and
+## the node then stays hidden and idle until driven.
+@export var autostart: bool = true
+
 var _compositor: Node = null
 var _client_pid: int = -1
 var _terminating_since: float = -1.0
 var _material: StandardMaterial3D = null
 var _client_command: String = DEFAULT_CLIENT_COMMAND
+
+## Whether the surface currently holds keyboard focus. Tracks the mapped state:
+## set when a surface maps, cleared on unmap or client-gone. Gates key routing so
+## keystrokes are never consumed -- and never forwarded to a dead surface -- when
+## there is no client to receive them.
+var _focused: bool = false
 
 ## Set once [method request_shutdown] is accepted. Distinguishes a requested
 ## teardown, which ends in [signal shutdown_finished], from a client that merely
@@ -59,6 +73,11 @@ func _ready() -> void:
 	var override := OS.get_environment("WRL_COMPOSITOR_CLIENT")
 	if override != "":
 		_client_command = override
+
+	if not autostart:
+		# Something else owns bring-up: stay dormant, holding no compositor, until
+		# it injects one and drives the surface handlers directly.
+		return
 
 	if not ClassDB.class_exists("WaylandCompositor"):
 		# Expected off Linux arm64, the only target the extension builds for; not a
@@ -220,6 +239,9 @@ func _on_surface_mapped(size: Vector2i) -> void:
 	# No texture exists yet — binding the material here would bind null.
 	print("[compositor_poc] surface mapped at %dx%d" % [size.x, size.y])
 	_apply_aspect(size)
+	# The one surface takes focus as soon as it maps: no SWindow arbitrates focus
+	# here, so a mapped client is the focused client.
+	_set_focus(true)
 
 
 func _on_surface_resized(size: Vector2i) -> void:
@@ -229,6 +251,7 @@ func _on_surface_resized(size: Vector2i) -> void:
 
 func _on_surface_unmapped() -> void:
 	visible = false
+	_set_focus(false)
 
 
 func _on_frame_available() -> void:
@@ -241,7 +264,62 @@ func _on_frame_available() -> void:
 
 func _on_client_gone() -> void:
 	visible = false
+	_set_focus(false)
 	print("[compositor_poc] client surface went away")
+
+
+## --- keyboard routing (Milestone 4) --------------------------------------
+##
+## Key events for the focused surface come from two sources: a real USB keyboard,
+## caught here as unhandled input, and an [XRToolsVirtualKeyboard2D] connected by
+## a host through [method attach_virtual_keyboard]. Both are no-ops off Linux
+## arm64, where there is no compositor to route to.
+
+
+## Connects a virtual keyboard so its taps reach the focused surface. A host wires
+## the keyboard it wants routed here; the standalone POC has none of its own, and
+## the app's windowing keyboard is deliberately left to the windowing system.
+## Idempotent, so re-attaching the same keyboard connects it only once.
+func attach_virtual_keyboard(keyboard: XRToolsVirtualKeyboard2D) -> void:
+	if keyboard == null:
+		return
+	if not keyboard.key_pressed.is_connected(_on_virtual_key):
+		keyboard.key_pressed.connect(_on_virtual_key)
+
+
+## Routes real keyboard events to the surface. Only unhandled keys arrive here, so
+## a focused Godot UI still gets first refusal; forwarded keys are then consumed
+## so typing cannot also drive input actions such as the simulator's locomotion.
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not _focused or _compositor == null:
+		return
+	var key := event as InputEventKey
+	if key == null:
+		return
+	# Echo (auto-repeat) events are dropped at the boundary, so they can be
+	# forwarded as-is; the client generates its own repeats from repeat_info.
+	_compositor.send_physical_key(key)
+	get_viewport().set_input_as_handled()
+
+
+## Routes a virtual-keyboard tap to the surface. The tap is a single pressed
+## event; send_virtual_key synthesizes its release and modifier chord at the
+## boundary. Signal-delivered, so it never reaches the Input singleton.
+func _on_virtual_key(event: InputEventKey) -> void:
+	if not _focused or _compositor == null:
+		return
+	_compositor.send_virtual_key(event)
+
+
+## Sets keyboard focus and the xdg_toplevel activated state together, tracking it
+## in [member _focused]. Clearing on unmap/gone mirrors the bridge's own defensive
+## clear and, more importantly, stops key routing once there is no live surface.
+func _set_focus(focused: bool) -> void:
+	if _compositor == null or _focused == focused:
+		return
+	_focused = focused
+	_compositor.set_keyboard_focus(focused)
+	_compositor.set_toplevel_activated(focused)
 
 
 ## Binds the compositor's current texture to the material. Returns whether a
