@@ -2,7 +2,8 @@
  * wl_bridge -- the only place wlroots types are allowed to exist.
  *
  * Scope: one Wayland server, one xdg_toplevel, wl_shm buffers copied to
- * the caller. No input, no resize negotiation, no popups, no subsurfaces.
+ * the caller, and a wl_seat with pointer + keyboard for driving that toplevel.
+ * No resize negotiation, no popups, no subsurfaces.
  *
  * The API deliberately carries state and events rather than only frames: the
  * caller has no way to see a wlr_surface, so mapping, resizing and client exit
@@ -110,6 +111,41 @@ int wlb_frame_acquire(wlb_server *server, wlb_frame *out);
  * never hears back stops drawing.
  */
 void wlb_frame_release(wlb_server *server, int accepted);
+
+/*
+ * --- input (wl_seat: pointer + keyboard) --------------------------------
+ *
+ * The caller passes plain data and never touches wlroots types. Pointer
+ * coordinates are surface-local pixels. Keycodes are Linux evdev codes; the
+ * bridge owns the xkb state and derives modifiers from it (xkb keycode =
+ * evdev + 8), so the caller sends only real press/release edges -- never
+ * synthetic repeats, which the client generates itself from the advertised
+ * repeat_info. Every call must come from the bridge's single thread.
+ *
+ * Each pointer call is one complete logical batch: after its events the bridge
+ * emits exactly one pointer frame, so the caller never sends a frame. A button
+ * press starts wlroots' implicit grab, so motion and the release keep reaching
+ * the pressed surface even when later coordinates fall outside it.
+ */
+void wlb_pointer_enter(wlb_server *server, double sx, double sy);
+void wlb_pointer_motion(wlb_server *server, double sx, double sy);
+void wlb_pointer_leave(wlb_server *server);
+void wlb_pointer_button(wlb_server *server, uint32_t button, int pressed);
+
+/* Keyboard focus gates key delivery and drives the wl_keyboard enter/leave the
+ * client needs before it will accept keys. */
+void wlb_keyboard_key(wlb_server *server, uint32_t keycode, int pressed);
+void wlb_keyboard_focus(wlb_server *server, int focused);
+
+/* xdg_toplevel activated state; the client uses it to render focus. */
+void wlb_toplevel_set_activated(wlb_server *server, int activated);
+
+/*
+ * Size, in pixels, the bridge configures the toplevel with on its initial
+ * commit -- set it before the client maps so the first buffer arrives at the
+ * slot size. 0x0 (the default) lets the client keep the size it chooses.
+ */
+void wlb_set_initial_size(wlb_server *server, uint32_t width, uint32_t height);
 
 /*
  * Tears down clients, then the display, then bridge-owned buffers and the

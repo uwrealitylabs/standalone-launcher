@@ -14,9 +14,14 @@
 
 #include <drm_fourcc.h>
 #include <wayland-server-core.h>
+#include <wayland-server-protocol.h>
+#include <xkbcommon/xkbcommon.h>
 
+#include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_keyboard.h>
+#include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_shm.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
@@ -30,6 +35,13 @@
 #define WLB_SHM_VERSION 1
 #define WLB_XDG_SHELL_VERSION 3
 
+/*
+ * Key repeat the keyboard advertises to the client, which owns repeat from
+ * here: the bridge forwards only real edges. Ordinary desktop defaults.
+ */
+#define WLB_REPEAT_RATE_HZ 25
+#define WLB_REPEAT_DELAY_MS 600
+
 
 struct wlb_server {
 	struct wl_display *display;
@@ -40,6 +52,25 @@ struct wlb_server {
 
 	struct wlr_compositor *compositor;
 	struct wlr_xdg_shell *xdg_shell;
+
+	/*
+	 * One wl_seat with pointer + keyboard. The keyboard is a deviceless
+	 * wlr_keyboard that exists only to carry the keymap and repeat_info the
+	 * seat advertises on focus; key edges are injected through the seat, and
+	 * the bridge owns the xkb_state it derives modifiers from. last_mods is
+	 * the last modifier mask sent, so a key that changes nothing sends no
+	 * redundant wl_keyboard.modifiers.
+	 */
+	struct wlr_seat *seat;
+	struct wlr_keyboard keyboard;
+	struct xkb_context *xkb_ctx;
+	struct xkb_keymap *xkb_keymap;
+	struct xkb_state *xkb_state;
+	struct wlr_keyboard_modifiers last_mods;
+	int seat_ready;
+
+	/* Size the toplevel is configured with on initial commit; 0x0 = client's own. */
+	uint32_t initial_width, initial_height;
 
 	/*
 	 * The bridge tracks exactly one toplevel. Later toplevels are closed rather
@@ -244,6 +275,12 @@ static void handle_surface_unmap(struct wl_listener *listener, void *data)
 	(void)data;
 	server->mapped = 0;
 	drop_pending(server);
+	/* Drop input focus defensively; a surface no client can see must not stay
+	 * the pointer or keyboard target. */
+	if (server->seat != NULL) {
+		wlr_seat_pointer_notify_clear_focus(server->seat);
+		wlr_seat_keyboard_notify_clear_focus(server->seat);
+	}
 	bridge_log("surface unmapped");
 	push_event(server, WLB_EVENT_UNMAPPED, 0, 0);
 }
@@ -277,6 +314,10 @@ static void teardown_client(wlb_server *server)
 	}
 	drop_pending(server);
 	detach_surface(server);
+	if (server->seat != NULL) {
+		wlr_seat_pointer_notify_clear_focus(server->seat);
+		wlr_seat_keyboard_notify_clear_focus(server->seat);
+	}
 	server->surface = NULL;
 	server->toplevel = NULL;
 	server->mapped = 0;
@@ -320,8 +361,13 @@ static void handle_xdg_surface_commit(struct wl_listener *listener, void *data)
 	if (server->toplevel == NULL || !server->toplevel->base->initial_commit) {
 		return;
 	}
-	/* 0x0 lets the client keep the size it already chose. */
-	wlr_xdg_toplevel_set_size(server->toplevel, 0, 0);
+	/*
+	 * Configure the client at its slot size before the first buffer maps.
+	 * initial_width/height default to 0x0, which lets the client keep the size
+	 * it chose -- the Compositor 0 behaviour when no size was requested.
+	 */
+	wlr_xdg_toplevel_set_size(server->toplevel, server->initial_width,
+			server->initial_height);
 }
 
 
@@ -460,6 +506,138 @@ static int bind_socket(wlb_server *server)
 }
 
 
+/* --- seat / input ------------------------------------------------------- */
+
+/*
+ * The keyboard carries only a name; it never has LEDs to update. wlroots guards
+ * the NULL led_update, and the bridge never calls wlr_keyboard_led_update.
+ */
+static const struct wlr_keyboard_impl wlb_keyboard_impl = {
+	.name = "wlb-virtual-keyboard",
+};
+
+
+/*
+ * The single input timestamp source. Wayland wants a monotonic millisecond
+ * clock shared across pointer and keyboard; wraparound at ~49 days is harmless,
+ * clients treat these as opaque and only compare them.
+ */
+static uint32_t now_msec(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
+}
+
+
+static struct wlr_keyboard_modifiers current_mods(wlb_server *server)
+{
+	struct wlr_keyboard_modifiers mods = {
+		.depressed = xkb_state_serialize_mods(server->xkb_state,
+				XKB_STATE_MODS_DEPRESSED),
+		.latched = xkb_state_serialize_mods(server->xkb_state,
+				XKB_STATE_MODS_LATCHED),
+		.locked = xkb_state_serialize_mods(server->xkb_state,
+				XKB_STATE_MODS_LOCKED),
+		.group = xkb_state_serialize_layout(server->xkb_state,
+				XKB_STATE_LAYOUT_EFFECTIVE),
+	};
+	return mods;
+}
+
+
+/* Sends a wl_keyboard.modifiers only when the mask actually changed. */
+static void sync_modifiers(wlb_server *server)
+{
+	struct wlr_keyboard_modifiers mods = current_mods(server);
+
+	if (mods.depressed == server->last_mods.depressed
+			&& mods.latched == server->last_mods.latched
+			&& mods.locked == server->last_mods.locked
+			&& mods.group == server->last_mods.group) {
+		return;
+	}
+	server->last_mods = mods;
+	wlr_seat_keyboard_notify_modifiers(server->seat, &mods);
+}
+
+
+/*
+ * Frees the xkb objects and finishes the keyboard. The wlr_seat itself is owned
+ * by the display and torn down with it, so it is not destroyed here. Idempotent.
+ */
+static void destroy_seat(wlb_server *server)
+{
+	if (server->seat_ready) {
+		wlr_keyboard_finish(&server->keyboard);
+		server->seat_ready = 0;
+	}
+	if (server->xkb_state != NULL) {
+		xkb_state_unref(server->xkb_state);
+		server->xkb_state = NULL;
+	}
+	if (server->xkb_keymap != NULL) {
+		xkb_keymap_unref(server->xkb_keymap);
+		server->xkb_keymap = NULL;
+	}
+	if (server->xkb_ctx != NULL) {
+		xkb_context_unref(server->xkb_ctx);
+		server->xkb_ctx = NULL;
+	}
+}
+
+
+/*
+ * Builds the seat, a default (us) xkb keymap and the deviceless keyboard that
+ * advertises it. A keymap that fails to compile would crash the client on
+ * focus, so it is validated here and creation fails instead. Returns 1 on
+ * success; on failure the partial state is freed and 0 returned.
+ */
+static int setup_seat(wlb_server *server)
+{
+	struct xkb_rule_names rules = { 0 };
+
+	server->seat = wlr_seat_create(server->display, "seat0");
+	if (server->seat == NULL) {
+		bridge_log("wlr_seat_create failed");
+		return 0;
+	}
+
+	server->xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+	if (server->xkb_ctx == NULL) {
+		bridge_log("xkb_context_new failed");
+		return 0;
+	}
+	server->xkb_keymap = xkb_keymap_new_from_names(server->xkb_ctx, &rules,
+			XKB_KEYMAP_COMPILE_NO_FLAGS);
+	if (server->xkb_keymap == NULL) {
+		bridge_log("xkb_keymap_new_from_names failed");
+		return 0;
+	}
+	server->xkb_state = xkb_state_new(server->xkb_keymap);
+	if (server->xkb_state == NULL) {
+		bridge_log("xkb_state_new failed");
+		return 0;
+	}
+
+	wlr_keyboard_init(&server->keyboard, &wlb_keyboard_impl,
+			wlb_keyboard_impl.name);
+	if (!wlr_keyboard_set_keymap(&server->keyboard, server->xkb_keymap)) {
+		bridge_log("wlr_keyboard_set_keymap rejected the keymap");
+		wlr_keyboard_finish(&server->keyboard);
+		return 0;
+	}
+	server->seat_ready = 1;
+	wlr_keyboard_set_repeat_info(&server->keyboard, WLB_REPEAT_RATE_HZ,
+			WLB_REPEAT_DELAY_MS);
+	wlr_seat_set_keyboard(server->seat, &server->keyboard);
+	wlr_seat_set_capabilities(server->seat,
+			WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD);
+	return 1;
+}
+
+
 /* --- lifecycle ---------------------------------------------------------- */
 
 wlb_server *wlb_create(char *socket_out, size_t socket_len)
@@ -522,6 +700,14 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 	server->new_toplevel.notify = handle_new_toplevel;
 	wl_signal_add(&server->xdg_shell->events.new_toplevel,
 			&server->new_toplevel);
+
+	if (!setup_seat(server)) {
+		bridge_log("seat setup failed");
+		destroy_seat(server);
+		wl_display_destroy(server->display);
+		free(server);
+		return NULL;
+	}
 
 	if (socket_out != NULL && socket_len > 0) {
 		snprintf(socket_out, socket_len, "%s", server->socket);
@@ -627,6 +813,109 @@ void wlb_frame_release(wlb_server *server, int accepted)
 }
 
 
+/* --- input -------------------------------------------------------------- */
+
+void wlb_pointer_enter(wlb_server *server, double sx, double sy)
+{
+	if (server == NULL || server->seat == NULL || server->surface == NULL) {
+		return;
+	}
+	/* wlr_seat_pointer_enter sends its own wl_pointer.frame after the enter
+	 * (types/seat/wlr_seat_pointer.c), so the bridge must not add a second one
+	 * -- unlike motion/button, whose raw sends carry no frame of their own. */
+	wlr_seat_pointer_notify_enter(server->seat, server->surface, sx, sy);
+}
+
+
+void wlb_pointer_motion(wlb_server *server, double sx, double sy)
+{
+	if (server == NULL || server->seat == NULL) {
+		return;
+	}
+	wlr_seat_pointer_notify_motion(server->seat, now_msec(), sx, sy);
+	wlr_seat_pointer_notify_frame(server->seat);
+}
+
+
+void wlb_pointer_leave(wlb_server *server)
+{
+	if (server == NULL || server->seat == NULL) {
+		return;
+	}
+	/* Deferred while a button is held: wlroots' implicit grab keeps the
+	 * pressed surface focused until release, which is the behaviour we want. */
+	wlr_seat_pointer_notify_clear_focus(server->seat);
+	wlr_seat_pointer_notify_frame(server->seat);
+}
+
+
+void wlb_pointer_button(wlb_server *server, uint32_t button, int pressed)
+{
+	if (server == NULL || server->seat == NULL) {
+		return;
+	}
+	wlr_seat_pointer_notify_button(server->seat, now_msec(), button,
+			pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+					: WL_POINTER_BUTTON_STATE_RELEASED);
+	wlr_seat_pointer_notify_frame(server->seat);
+}
+
+
+void wlb_keyboard_key(wlb_server *server, uint32_t keycode, int pressed)
+{
+	if (server == NULL || !server->seat_ready) {
+		return;
+	}
+	wlr_seat_keyboard_notify_key(server->seat, now_msec(), keycode,
+			pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+					: WL_KEYBOARD_KEY_STATE_RELEASED);
+	/*
+	 * xkb keycode = evdev + 8. Update state after the key so a modifier press
+	 * (e.g. Shift) reaches the client as its key event first, then the mask;
+	 * the dependent key arrives on a later call with the mask already applied.
+	 */
+	xkb_state_update_key(server->xkb_state, keycode + 8,
+			pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
+	sync_modifiers(server);
+}
+
+
+void wlb_keyboard_focus(wlb_server *server, int focused)
+{
+	if (server == NULL || !server->seat_ready) {
+		return;
+	}
+	if (focused && server->surface != NULL) {
+		struct wlr_keyboard_modifiers mods = current_mods(server);
+
+		/* No keys are tracked as held across a focus change. */
+		wlr_seat_keyboard_notify_enter(server->seat, server->surface,
+				NULL, 0, &mods);
+	} else {
+		wlr_seat_keyboard_notify_clear_focus(server->seat);
+	}
+}
+
+
+void wlb_toplevel_set_activated(wlb_server *server, int activated)
+{
+	if (server == NULL || server->toplevel == NULL) {
+		return;
+	}
+	wlr_xdg_toplevel_set_activated(server->toplevel, activated);
+}
+
+
+void wlb_set_initial_size(wlb_server *server, uint32_t width, uint32_t height)
+{
+	if (server == NULL) {
+		return;
+	}
+	server->initial_width = width;
+	server->initial_height = height;
+}
+
+
 void wlb_destroy(wlb_server *server)
 {
 	if (server == NULL) {
@@ -649,6 +938,14 @@ void wlb_destroy(wlb_server *server)
 	 */
 	if (server->display != NULL) {
 		wl_display_destroy_clients(server->display);
+	}
+	/*
+	 * Finish the keyboard and free the xkb objects before the display goes:
+	 * the wlr_seat is owned by the display and destroyed with it, and it drops
+	 * its reference to the keyboard when the keyboard is finished.
+	 */
+	destroy_seat(server);
+	if (server->display != NULL) {
 		wl_display_destroy(server->display);
 	}
 
