@@ -1,5 +1,6 @@
 #include "wayland_compositor.h"
 
+#include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -20,6 +21,119 @@ using namespace godot;
 static void bridge_log_sink(const char *msg)
 {
 	UtilityFunctions::print("[wayland] ", String(msg));
+}
+
+
+/*
+ * Linux evdev codes are the kernel's frozen input ABI, so the literals below are
+ * stable. They are written out rather than pulled from <linux/input-event-codes.h>
+ * because that header's KEY_* macros collide with godot-cpp's Key enum labels of
+ * the same spelling -- including it here would rewrite godot::KEY_A to a number.
+ */
+static constexpr uint32_t EVDEV_LEFTSHIFT = 42;
+static constexpr uint32_t EVDEV_LEFTCTRL = 29;
+static constexpr uint32_t EVDEV_LEFTALT = 56;
+static constexpr uint32_t EVDEV_LEFTMETA = 125;
+static constexpr uint32_t EVDEV_BTN_LEFT = 272;
+static constexpr uint32_t EVDEV_BTN_RIGHT = 273;
+static constexpr uint32_t EVDEV_BTN_MIDDLE = 274;
+
+/* Sentinel for a Godot key with no evdev equivalent; callers drop it. */
+static constexpr uint32_t EVDEV_NONE = 0;
+
+
+/*
+ * Maps a Godot physical key to its Linux evdev keycode. Physical, not logical:
+ * the value names a position on the US layout, which is exactly what a Wayland
+ * client re-interprets through its own xkb keymap. `location` disambiguates the
+ * paired modifiers (left vs right Shift/Ctrl/Alt/Meta); it is ignored for keys
+ * that have a single position.
+ *
+ * Switches on the compiler-checked Key enum so a Godot value renumbering is
+ * caught at build time, and returns the frozen evdev integer. Returns
+ * EVDEV_NONE for keys outside a standard 104-key keyboard plus keypad.
+ */
+static uint32_t physical_key_to_evdev(Key key, KeyLocation location)
+{
+	const bool right = location == KEY_LOCATION_RIGHT;
+
+	switch (key) {
+	/* Letters, in evdev row order rather than alphabetical. */
+	case KEY_Q: return 16; case KEY_W: return 17; case KEY_E: return 18;
+	case KEY_R: return 19; case KEY_T: return 20; case KEY_Y: return 21;
+	case KEY_U: return 22; case KEY_I: return 23; case KEY_O: return 24;
+	case KEY_P: return 25;
+	case KEY_A: return 30; case KEY_S: return 31; case KEY_D: return 32;
+	case KEY_F: return 33; case KEY_G: return 34; case KEY_H: return 35;
+	case KEY_J: return 36; case KEY_K: return 37; case KEY_L: return 38;
+	case KEY_Z: return 44; case KEY_X: return 45; case KEY_C: return 46;
+	case KEY_V: return 47; case KEY_B: return 48; case KEY_N: return 49;
+	case KEY_M: return 50;
+
+	/* Number row. */
+	case KEY_1: return 2; case KEY_2: return 3; case KEY_3: return 4;
+	case KEY_4: return 5; case KEY_5: return 6; case KEY_6: return 7;
+	case KEY_7: return 8; case KEY_8: return 9; case KEY_9: return 10;
+	case KEY_0: return 11;
+
+	/* Punctuation. */
+	case KEY_MINUS: return 12; case KEY_EQUAL: return 13;
+	case KEY_BRACKETLEFT: return 26; case KEY_BRACKETRIGHT: return 27;
+	case KEY_BACKSLASH: return 43; case KEY_SEMICOLON: return 39;
+	case KEY_APOSTROPHE: return 40; case KEY_QUOTELEFT: return 41;
+	case KEY_COMMA: return 51; case KEY_PERIOD: return 52; case KEY_SLASH: return 53;
+
+	/* Whitespace and editing. */
+	case KEY_SPACE: return 57; case KEY_ENTER: return 28; case KEY_TAB: return 15;
+	case KEY_BACKSPACE: return 14; case KEY_ESCAPE: return 1;
+
+	/* Navigation and editing cluster. */
+	case KEY_INSERT: return 110; case KEY_DELETE: return 111;
+	case KEY_HOME: return 102; case KEY_END: return 107;
+	case KEY_PAGEUP: return 104; case KEY_PAGEDOWN: return 109;
+	case KEY_LEFT: return 105; case KEY_RIGHT: return 106;
+	case KEY_UP: return 103; case KEY_DOWN: return 108;
+
+	/* Locks. */
+	case KEY_CAPSLOCK: return 58; case KEY_NUMLOCK: return 69;
+	case KEY_SCROLLLOCK: return 70;
+
+	/* Function row. */
+	case KEY_F1: return 59; case KEY_F2: return 60; case KEY_F3: return 61;
+	case KEY_F4: return 62; case KEY_F5: return 63; case KEY_F6: return 64;
+	case KEY_F7: return 65; case KEY_F8: return 66; case KEY_F9: return 67;
+	case KEY_F10: return 68; case KEY_F11: return 87; case KEY_F12: return 88;
+
+	/* Paired modifiers: location picks the side, left by default. */
+	case KEY_SHIFT: return right ? 54 : EVDEV_LEFTSHIFT;
+	case KEY_CTRL: return right ? 97 : EVDEV_LEFTCTRL;
+	case KEY_ALT: return right ? 100 : EVDEV_LEFTALT;
+	case KEY_META: return right ? 126 : EVDEV_LEFTMETA;
+	case KEY_MENU: return 127;
+
+	/* Keypad. */
+	case KEY_KP_0: return 82; case KEY_KP_1: return 79; case KEY_KP_2: return 80;
+	case KEY_KP_3: return 81; case KEY_KP_4: return 75; case KEY_KP_5: return 76;
+	case KEY_KP_6: return 77; case KEY_KP_7: return 71; case KEY_KP_8: return 72;
+	case KEY_KP_9: return 73; case KEY_KP_MULTIPLY: return 55;
+	case KEY_KP_DIVIDE: return 98; case KEY_KP_SUBTRACT: return 74;
+	case KEY_KP_ADD: return 78; case KEY_KP_PERIOD: return 83;
+	case KEY_KP_ENTER: return 96;
+
+	default: return EVDEV_NONE;
+	}
+}
+
+
+/* Godot MouseButton to the evdev BTN_* the pointer sends; 0 when unmapped. */
+static uint32_t mouse_button_to_evdev(MouseButton button)
+{
+	switch (button) {
+	case MOUSE_BUTTON_LEFT: return EVDEV_BTN_LEFT;
+	case MOUSE_BUTTON_RIGHT: return EVDEV_BTN_RIGHT;
+	case MOUSE_BUTTON_MIDDLE: return EVDEV_BTN_MIDDLE;
+	default: return EVDEV_NONE;
+	}
 }
 
 
@@ -50,6 +164,25 @@ void WaylandCompositor::_bind_methods()
 			&WaylandCompositor::get_surface_size);
 	ClassDB::bind_method(D_METHOD("get_texture"), &WaylandCompositor::get_texture);
 	ClassDB::bind_method(D_METHOD("get_stats"), &WaylandCompositor::get_stats);
+
+	ClassDB::bind_method(D_METHOD("pointer_enter", "uv"),
+			&WaylandCompositor::pointer_enter);
+	ClassDB::bind_method(D_METHOD("pointer_motion", "uv"),
+			&WaylandCompositor::pointer_motion);
+	ClassDB::bind_method(D_METHOD("pointer_leave"),
+			&WaylandCompositor::pointer_leave);
+	ClassDB::bind_method(D_METHOD("send_button", "button", "pressed"),
+			&WaylandCompositor::send_button);
+	ClassDB::bind_method(D_METHOD("send_physical_key", "event"),
+			&WaylandCompositor::send_physical_key);
+	ClassDB::bind_method(D_METHOD("send_virtual_key", "event"),
+			&WaylandCompositor::send_virtual_key);
+	ClassDB::bind_method(D_METHOD("set_keyboard_focus", "focused"),
+			&WaylandCompositor::set_keyboard_focus);
+	ClassDB::bind_method(D_METHOD("set_toplevel_activated", "activated"),
+			&WaylandCompositor::set_toplevel_activated);
+	ClassDB::bind_method(D_METHOD("set_initial_size", "size"),
+			&WaylandCompositor::set_initial_size);
 
 	ADD_SIGNAL(MethodInfo("surface_mapped",
 			PropertyInfo(Variant::VECTOR2I, "size")));
@@ -348,4 +481,135 @@ Dictionary WaylandCompositor::get_stats() const
 	out["convert_submit_ms_p95"] = pct(0.95);
 	out["convert_submit_ms_p99"] = pct(0.99);
 	return out;
+}
+
+
+/*
+ * UV to surface-local pixels against the current mapped size. Not clamped: an
+ * implicit grab legitimately reports coordinates outside [0, size], and the
+ * bridge forwards them to the grabbing surface unchanged.
+ */
+void WaylandCompositor::pointer_enter(const Vector2 &uv)
+{
+	uint32_t w = 0, h = 0;
+
+	if (server == nullptr) {
+		return;
+	}
+	wlb_surface_size(server, &w, &h);
+	if (w == 0 || h == 0) {
+		return;
+	}
+	wlb_pointer_enter(server, uv.x * (double)w, uv.y * (double)h);
+}
+
+
+void WaylandCompositor::pointer_motion(const Vector2 &uv)
+{
+	uint32_t w = 0, h = 0;
+
+	if (server == nullptr) {
+		return;
+	}
+	wlb_surface_size(server, &w, &h);
+	if (w == 0 || h == 0) {
+		return;
+	}
+	wlb_pointer_motion(server, uv.x * (double)w, uv.y * (double)h);
+}
+
+
+void WaylandCompositor::pointer_leave()
+{
+	if (server == nullptr) {
+		return;
+	}
+	wlb_pointer_leave(server);
+}
+
+
+void WaylandCompositor::send_button(int button, bool pressed)
+{
+	uint32_t code = mouse_button_to_evdev((MouseButton)button);
+
+	if (server == nullptr || code == EVDEV_NONE) {
+		return;
+	}
+	wlb_pointer_button(server, code, pressed ? 1 : 0);
+}
+
+
+void WaylandCompositor::send_physical_key(const Ref<InputEventKey> &event)
+{
+	if (server == nullptr || event.is_null() || event->is_echo()) {
+		return;
+	}
+	uint32_t code = physical_key_to_evdev(event->get_physical_keycode(),
+			event->get_location());
+	if (code == EVDEV_NONE) {
+		return;
+	}
+	wlb_keyboard_key(server, code, event->is_pressed() ? 1 : 0);
+}
+
+
+void WaylandCompositor::send_virtual_key(const Ref<InputEventKey> &event)
+{
+	/*
+	 * The virtual keyboard emits a single pressed event carrying its modifier
+	 * flags, with no release to follow. Hold the modifier chord across a
+	 * press+release of the key, then let it go -- so the client sees a complete
+	 * keystroke and no latched modifier.
+	 */
+	if (server == nullptr || event.is_null()) {
+		return;
+	}
+	uint32_t code = physical_key_to_evdev(event->get_physical_keycode(),
+			KEY_LOCATION_UNSPECIFIED);
+	if (code == EVDEV_NONE) {
+		return;
+	}
+
+	uint32_t chord[4];
+	int n = 0;
+	if (event->is_shift_pressed()) { chord[n++] = EVDEV_LEFTSHIFT; }
+	if (event->is_ctrl_pressed()) { chord[n++] = EVDEV_LEFTCTRL; }
+	if (event->is_alt_pressed()) { chord[n++] = EVDEV_LEFTALT; }
+	if (event->is_meta_pressed()) { chord[n++] = EVDEV_LEFTMETA; }
+
+	for (int i = 0; i < n; i++) {
+		wlb_keyboard_key(server, chord[i], 1);
+	}
+	wlb_keyboard_key(server, code, 1);
+	wlb_keyboard_key(server, code, 0);
+	for (int i = n - 1; i >= 0; i--) {
+		wlb_keyboard_key(server, chord[i], 0);
+	}
+}
+
+
+void WaylandCompositor::set_keyboard_focus(bool focused)
+{
+	if (server == nullptr) {
+		return;
+	}
+	wlb_keyboard_focus(server, focused ? 1 : 0);
+}
+
+
+void WaylandCompositor::set_toplevel_activated(bool activated)
+{
+	if (server == nullptr) {
+		return;
+	}
+	wlb_toplevel_set_activated(server, activated ? 1 : 0);
+}
+
+
+void WaylandCompositor::set_initial_size(const Vector2i &size)
+{
+	if (server == nullptr) {
+		return;
+	}
+	wlb_set_initial_size(server, (uint32_t)size.x, (uint32_t)size.y);
 }

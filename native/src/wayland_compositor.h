@@ -3,10 +3,12 @@
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float64_array.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
 extern "C" {
@@ -48,6 +50,37 @@ public:
 	Vector2i get_surface_size() const;
 	Ref<ImageTexture> get_texture() const;
 	Dictionary get_stats() const;
+
+	/*
+	 * --- input: GDScript drives the hosted toplevel through these ------------
+	 *
+	 * The boundary converts to Wayland's model so callers stay in Godot terms:
+	 * pointer position is normalized surface UV (0..1 across the mapped size,
+	 * and may fall outside it during an implicit grab); buttons are Godot
+	 * MouseButton; keys are InputEventKey. All are no-ops until a surface maps.
+	 */
+	void pointer_enter(const Vector2 &uv);
+	void pointer_motion(const Vector2 &uv);
+	void pointer_leave();
+	void send_button(int button, bool pressed);
+
+	/*
+	 * A real key event: translated 1:1, press/release and left/right location
+	 * preserved. Echo (auto-repeat) events are dropped -- Wayland clients
+	 * generate their own repeats from the advertised repeat_info.
+	 */
+	void send_physical_key(const Ref<InputEventKey> &event);
+
+	/*
+	 * A virtual-keyboard tap, which arrives as a single pressed event with its
+	 * modifier flags. Expanded at the boundary into the modifier chord, the key
+	 * press and release, and the modifier release, since no real release follows.
+	 */
+	void send_virtual_key(const Ref<InputEventKey> &event);
+
+	void set_keyboard_focus(bool focused);
+	void set_toplevel_activated(bool activated);
+	void set_initial_size(const Vector2i &size);
 
 protected:
 	static void _bind_methods();
