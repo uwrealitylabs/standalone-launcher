@@ -197,6 +197,13 @@ not exercise the off-surface grab path or the plane's live-depth tracking. Heade
 resize already resolve against the live plane throughout their gesture, so a grab that keeps
 using the plane stays consistent with them.
 
+The two-source split is deliberate, not an oversight to simplify later: the on-collider
+parity does **not** make the plane redundant, because only the plane yields the off-collider
+coordinate the implicit grab requires, and the raycast the collision point comes from is
+already needed to select the target. Do not collapse hover and grab onto one source —
+`tests/collision_zorder_parity_test.gd` carries the same warning, and the rationale should
+be repeated in `_locked_plane_hit`'s doc comment when Milestone 3 edits it.
+
 Add a small compositor `WaylandPointerRouter` that reduces the two `HandPointer` streams
 to Wayland's single pointer. The first hovering hand is the default owner; a non-owner
 press can claim ownership only while the current owner is not pressed; once pressed, the

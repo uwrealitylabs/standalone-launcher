@@ -18,6 +18,18 @@ extends SceneTree
 ## the point check fails; if plane and collider selection can diverge in the
 ## region gestures use, the selection check fails.
 ##
+## Why the plane is kept, and must not be "simplified" away in favour of the
+## collision point: this parity holds ON the collider only. During a press
+## Wayland holds an implicit grab, so motion and the release must keep reaching
+## the pressed surface even after the ray leaves the collider — exactly where the
+## raycast returns nothing and only the infinite plane still yields a coordinate.
+## Header drag and resize need the same off-collider continuation. So the design
+## is a deliberate split: the collision point drives unpressed hover (its hit/miss
+## is the natural enter/leave edge, and the raycast runs anyway to select which
+## overlapping window is under the ray), and the plane drives press-through-
+## release. This test's on-collider agreement is what makes that handoff seamless;
+## it is NOT a licence to collapse the two sources into one.
+##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/collision_zorder_parity_test.gd
