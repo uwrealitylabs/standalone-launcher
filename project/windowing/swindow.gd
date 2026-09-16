@@ -1,10 +1,7 @@
 class_name SWindow extends Node3D
 
-# Gesture code writes global_position while apply_z_order writes local position.
-# These agree only while the WindowManager stays unrotated and unscaled: a
-# RemoteTransform3D (root.tscn) drives it in position only, so locomotion
-# translates it but never rotates or scales it, which keeps the mixed
-# local-z / global-xy writes below safe.
+# WindowManager owns placement, writing this window's transform from its assigned
+# slot; the window never writes its own position. A resize keeps the centre fixed.
 
 @export_group("Content")
 @export var content: PackedScene
@@ -13,47 +10,58 @@ class_name SWindow extends Node3D
 @export var header_3d: XRToolsViewport2DIn3D
 @export var content_3d: XRToolsViewport2DIn3D
 
-signal on_closed()
-signal on_focused(win: SWindow)
+signal closed()
+signal focused(win: SWindow)
+# Raised when the header's solo button is pressed; the manager decides whether it
+# means enter or exit based on the current presentation state.
+signal solo_requested(win: SWindow)
 
-## This window's depth order (higher = more in front)
-var z_order: int = 0
+# The manager that owns this window's placement and size policy. Null for a
+# standalone window (e.g. a headless test fixture), which falls back to the
+# numeric clamp below.
+var manager: WindowManager = null
 
-## The depth offset per z-order level (in meters)
-const Z_STEP: float = 0.05
-
-## Shared depth baseline for z-order level 0 (in meters).
-const LAYER_ORIGIN_Z: float = -2.0
-
-# Drag state variables
-var _dragging    := false
-var _drag_offset := Vector3.ZERO
-var _drag_target := Vector3.ZERO
-# Frozen at grab time so the window can't drift in depth. Accepted residual: an
-# OUTSIDE z-order change mid-gesture (e.g. another window closing) leaves the
-# frozen planes one z-step off until release, while window depth itself stays on
-# the z_order grid.
-var _drag_plane  := Plane()
-var world_bounds := AABB(Vector3(-3, 0.5, -1.5), Vector3(6, 3, 0)) #update as needed
-@export var follow_speed: float = 30.0
+# True while this window is suspended behind a solo presentation (a sibling of the
+# soloed window): surfaces hidden, all collision and key routing off.
+var is_suspended := false
+# True while this window (the soloed one) is interaction-locked for a tween:
+# collision and key routing off, mesh and redraw still live.
+var _interaction_locked := false
+# True while the manager is running a solo enter/exit tween on this window. Kept
+# separate from _resizing so both can gate _process through one owner.
+var _transitioning := false
 
 # Resize window variables
-var _resizing          := false
-var _resize_handle     := ""
-# World-space grab point; deltas are measured in world space because the
-# window itself moves during L/B resizes — measuring in the live local frame
-# would feed the position shift back into the measurement (edge tracks only
-# 2/3 of pointer motion and oscillates)
-var _resize_start_hit  := Vector3.ZERO
-var _resize_start_size := Vector2.ZERO
-var _resize_start_pos  := Vector3.ZERO
-var _resize_plane      := Plane()
+var _resizing           := false
+var _resize_handle      := ""
+# Grab point in the window's OWN frame; mid-gesture hits convert back to it, so
+# displacement is measured relative to the window. Keeps the resize fixed-centre,
+# rotation-safe, and immune to the window moving mid-gesture (e.g. locomotion
+# sliding the whole arc while a resize is live).
+var _resize_start_local := Vector3.ZERO
+var _resize_start_size  := Vector2.ZERO
+# Permutation-safe width cap, frozen at gesture start so mid-gesture frames need
+# no rescan; read through clamp_content_size while _resizing.
+var _resize_max_width   := MAX_CONTENT_SIZE.x
 
 # Grab bands straddling the content edges, keyed by handle id
 var _resize_handles := {}
-# Thickness tracks the window so a small one is not mostly handle, and stops
-# growing once the band is comfortably wide enough to hit. Staying under half
-# keeps the spans in _layout_resize_handles positive at MIN_CONTENT_SIZE.
+# Unshaded white marks hinting each handle, keyed by handle id. Pure visuals (no
+# collision); shown while any ray hovers the handle.
+var _resize_affordances := {}
+# Which pointers hover each handle: handle id -> set of pointer instance ids (0 for
+# a null/synthetic pointer). Counted per pointer so one hand's EXITED can't hide a
+# mark the other hand is still on.
+var _affordance_hovers := {}
+# Nominal length of a mark along its edge, capped to a fraction of that edge so
+# the two bottom corners never overlap and a mark never spans its whole side.
+const AFFORDANCE_LENGTH := 0.12
+const AFFORDANCE_THICKNESS := 0.006
+# In front of the handle bodies (viewer on +z) so the marks never Z-fight the
+# screen or the collision boxes.
+const AFFORDANCE_Z := HANDLE_Z + HANDLE_DEPTH / 2.0 + 0.001
+# Thickness tracks the window (a small one isn't mostly handle) but caps out. The
+# ratio stays under half so _layout_resize_handles spans stay positive at MIN size.
 const HANDLE_THICKNESS_RATIO := 0.15
 const HANDLE_MAX_THICKNESS := 0.12
 # Depth budget in window-local z, viewer on the +z side. A ray reports the
@@ -62,31 +70,43 @@ const HANDLE_MAX_THICKNESS := 0.12
 #   -0.020 .. 0.000  own screen    XRToolsViewport2DIn3D hangs the box behind
 #                                  the quad, so its front face is the plane at 0
 #    0.000 .. 0.020  own handles   HANDLE_Z +/- HANDLE_DEPTH / 2
-#    0.020 .. 0.030  empty
-#    0.030 .. 0.050  next window's screen, starting at Z_STEP - SCREEN_DEPTH
-#    0.050 .. 0.070  next window's handles
 #
-# Nothing overlaps; good.
+# The screen sits behind the handles, so grabbing an edge never picks the screen.
 const SCREEN_DEPTH := 0.02
 const HANDLE_DEPTH := 0.02
 const HANDLE_Z := 0.01
 # Must intersect the controller raycasts' collision_mask in root.tscn
 const HANDLE_COLLISION_LAYER := 4194304
 
-# Size of the actual content, not the header. The literal is a placeholder.
+# Size of the actual content, not the header. Persistent across a solo
+# presentation, which uses `current_solo_size` instead. The literal is a
+# placeholder.
 var content_size := Vector2(1.5, 0.75)
+# Animated/live solo presentation size. Meaningful only while this window is
+# `manager.soloed_window` (manager state ENTERING/SOLO/EXITING); reset to
+# Vector2.ZERO after exit completes.
+var current_solo_size := Vector2.ZERO
+# The size the geometry currently reflects — the argument of the last
+# _apply_presented_geometry, independent of which persistent field (content_size /
+# current_solo_size) is authoritative. The resolution subsystem and the geometry
+# helpers read this.
+var _active_size := Vector2.ZERO
 const HEADER_HEIGHT  : float = 0.08     # fixed header height in world units
-const MIN_CONTENT_SIZE := Vector2(0.4, 0.2)
-const MAX_CONTENT_SIZE := Vector2(3.0, 2.5)
+# Content aspect ratio (width:height). The min/max corners sit on this ratio, so a
+# per-axis clamp of a matching-ratio size lands on a corner without distorting it;
+# the default and solo sizes rely on that to stay 16:9 through clamping.
+const CONTENT_ASPECT := 16.0 / 9.0
+const MIN_CONTENT_SIZE := Vector2(0.4, 0.4 / CONTENT_ASPECT)
+const MAX_CONTENT_SIZE := Vector2(3.0, 3.0 / CONTENT_ASPECT)
 # Render density of each surface. Held constant across resizes so a bigger
 # window buys more room rather than bigger content.
 var PIXELS_PER_UNIT := 150.0
 var HEADER_PIXELS_PER_UNIT := 150.0
 
-# Live-resize resolution throttle. Reallocating a render target also relays out
-# the 2D scene inside it, so committing every frame of a drag risks both a hitch
-# and a visible re-wrap. MAX_STRETCH does the real saving by bounding how far the
-# targets may lag the quads; the interval is only a ceiling on commit rate.
+# Live-resize resolution throttle. Reallocating a render target relays out its 2D
+# scene, so committing every drag frame risks a hitch and a visible re-wrap.
+# MAX_STRETCH bounds how far the targets may lag the quads; the interval is only a
+# ceiling on commit rate.
 const MAX_STRETCH := 0.03
 const MIN_COMMIT_INTERVAL := 1.0 / 15.0
 # Content size the current render targets were allocated for
@@ -97,17 +117,18 @@ var _since_commit := 0.0
 func _ready() -> void:
 	var window_header: SWindowHeader = header_3d.get_scene_instance()
 	window_header.close_pressed.connect(close)
+	window_header.solo_pressed.connect(func(): solo_requested.emit(self))
 
 	set_content(content)
 	set_input_enabled(false)
 
 	header_3d.pointer_event.connect(_on_pointer_event)
-	header_3d.pointer_event.connect(_on_header_pointer_event)
 	content_3d.pointer_event.connect(_on_pointer_event)
 
 	# Seed from the authored scene, not from the script defaults above, so the
 	# two cannot silently disagree.
 	content_size = content_3d.screen_size
+	_active_size = content_size
 	PIXELS_PER_UNIT = content_3d.viewport_size.x / (0.00001 + content_3d.screen_size.x)
 	HEADER_PIXELS_PER_UNIT = header_3d.viewport_size.x / (0.00001 + header_3d.screen_size.x)
 
@@ -115,27 +136,14 @@ func _ready() -> void:
 		header_3d.enabled = true
 		content_3d.set_process_input(false)
 	_build_resize_handles()
-	_apply_size(content_size)
+	_build_resize_affordances()
+	_apply_presented_geometry(content_size)
 
 
 ## Focuses the window on any press, whichever surface the pointer hit.
 func _on_pointer_event(event: XRToolsPointerEvent):
 	if event.event_type == XRToolsPointerEvent.Type.PRESSED:
 		focus()
-
-
-func _on_header_pointer_event(event: XRToolsPointerEvent):
-	match event.event_type:
-		XRToolsPointerEvent.Type.PRESSED:
-			start_drag(event)
-		XRToolsPointerEvent.Type.MOVED:
-			var hit = _resolve_pointer_hit(event, _drag_plane)
-			if hit != null:
-				update_drag(hit)
-		XRToolsPointerEvent.Type.RELEASED:
-			stop_drag()
-		_:
-			pass
 
 
 ## Intersects the pointer that raised `event` with `plane`. Returns the hit as a
@@ -162,30 +170,109 @@ func set_content(new_content: PackedScene) -> void:
 
 ## Requests focus for this window; the window manager performs the reorder.
 func focus() -> void:
-	on_focused.emit(self)
+	focused.emit(self)
 
 
-## Sets whether input events will be directed to this window, and tells the
-## content scene, if it defines on_window_focus_changed(bool), that focus moved.
-func set_input_enabled(enabled: bool) -> void:
+## Routes or unroutes physical keyboard/gamepad input to this window's surfaces.
+## Interaction concern only: it does not tell the content that focus changed, so
+## a transition lock can cut input without reporting a focus loss that never
+## happened.
+func _set_key_routing(enabled: bool) -> void:
 	content_3d.input_keyboard = enabled
 	content_3d.input_gamepad = enabled
-	# The header is gated for keys too, or every window's title bar would keep
-	# taking physical ones no matter which window is being typed into. Its
-	# gamepad flag is left as authored, which is off.
+	# Gate the header's keys too, or every title bar keeps taking physical keys
+	# regardless of focus. Its gamepad flag is left as authored (off).
 	header_3d.input_keyboard = enabled
 
-	# The scene is set after the first focus call, so early on there is nothing
-	# to notify yet -- content_3d reports null until then.
+
+## Tells the content scene, if it defines on_window_focus_changed(bool), that
+## focus moved. Notification concern only: it routes no input.
+func _notify_content_focus(enabled: bool) -> void:
+	# content_3d reports null until the scene is set on first focus; nothing to
+	# notify before then.
 	var scene := content_3d.get_scene_instance()
 	if scene and scene.has_method("on_window_focus_changed"):
 		scene.on_window_focus_changed(enabled)
 
-## Places the window at the depth its z_order calls for, leaving XY untouched.
-func apply_z_order() -> void:
-	# Derived from z_order alone, never from the current position, so repeated
-	# reorders cannot let depth drift off the Z_STEP grid
-	position.z = LAYER_ORIGIN_Z + z_order * Z_STEP
+
+## Sets whether input events will be directed to this window, and tells the
+## content scene that focus moved. Used by the manager's focus(); preserves the
+## combined behaviour of the two concerns above.
+func set_input_enabled(enabled: bool) -> void:
+	_set_key_routing(enabled)
+	_notify_content_focus(enabled)
+
+## Notifies the content scene, if it defines on_window_suspended(bool), that it
+## was suspended or reactivated behind a solo presentation.
+func _notify_content_suspended(suspended: bool) -> void:
+	var scene := content_3d.get_scene_instance()
+	if scene and scene.has_method("on_window_suspended"):
+		scene.on_window_suspended(suspended)
+
+
+## Sets the `disabled` flag on every resize handle's collider — true disables
+## picking, false restores it. Named for the flag it writes so the call site
+## reads plainly (`_set_handles_disabled(true)` disables). Handles are separate
+## bodies under ResizeHandles, so the addon's visibility cascade never reaches
+## them; suspend/lock must toggle them explicitly.
+func _set_handles_disabled(disabled: bool) -> void:
+	for body: StaticBody3D in _resize_handles.values():
+		(body.get_child(0) as CollisionShape3D).disabled = disabled
+
+
+## Clears every handle's hover state and hides its affordance mark. A handle whose
+## collider is being disabled while a ray hovers it never emits EXITED, so its
+## separate visible mark would otherwise hang in the air. Call whenever handle
+## collision is taken away.
+func _clear_hover_affordances() -> void:
+	for hovers: Dictionary in _affordance_hovers.values():
+		hovers.clear()
+	for group: Node3D in _resize_affordances.values():
+		group.visible = false
+
+
+## Suspends or reactivates this window as a sibling of a solo presentation.
+## Idempotent. Suspending hides both surfaces (which stops redraw and, through the
+## addon's visibility cascade, disables their screen colliders), disables every
+## resize handle's collider explicitly, clears hover marks, and cuts key routing.
+## Reactivating reverses visibility and handle collision. Focus routing is owned
+## by focus(), not here.
+func set_suspended(suspended: bool) -> void:
+	if is_suspended == suspended:
+		return
+	is_suspended = suspended
+	if suspended:
+		content_3d.visible = false
+		header_3d.visible = false
+		_set_handles_disabled(true)
+		_clear_hover_affordances()
+		_set_key_routing(false)
+	else:
+		content_3d.visible = true
+		header_3d.visible = true
+		_set_handles_disabled(false)
+	_notify_content_suspended(suspended)
+
+
+## Locks or unlocks interaction on the soloed window for the length of a solo
+## tween: toggles collision and key routing only, leaving the mesh and redraw
+## live. Locking disables both screen colliders (through the surfaces' `enabled`,
+## since they stay visible) and every handle collider, and clears hover marks.
+## Unlock derives key-routing eligibility from focus (never a blind enable) and
+## never fires the focus hook. Idempotent.
+func set_interaction_locked(locked: bool) -> void:
+	if _interaction_locked == locked:
+		return
+	_interaction_locked = locked
+	content_3d.enabled = not locked
+	header_3d.enabled = not locked
+	_set_handles_disabled(locked)  # disabled == locked
+	if locked:
+		_clear_hover_affordances()
+		_set_key_routing(false)
+	else:
+		_set_key_routing(manager != null and manager.focused_window == self)
+
 
 ## Dims the header while the window is not the focused one.
 func set_focused_visual(is_focused: bool) -> void:
@@ -197,164 +284,204 @@ func set_focused_visual(is_focused: bool) -> void:
 	else:
 		mat.albedo_color = Color(0.6, 0.6, 0.6, 1.0)
 
-## The window's facing plane at its current depth. Assumes the window is
-## XY-axis-aligned.
-func _get_plane() -> Plane:
-	return Plane(Vector3(0, 0, 1), global_position)
-
-## Starts a header drag from the grab described by `event`. No-op when the
-## pointer ray misses the window's plane.
-func start_drag(event: XRToolsPointerEvent) -> void:
-	# Focus first: it can raise the window by n*Z_STEP, so the gesture plane
-	# must be frozen at the NEW depth. The baseline is then resolved against
-	# that same plane — never event.position, which sits on the pre-focus
-	# plane and would pop the window sideways on the first MOVED frame.
-	focus()
-	_drag_plane = _get_plane()
-	var hit = _resolve_pointer_hit(event, _drag_plane)
-	if hit == null:
-		return
-	_dragging = true
-	_drag_offset = global_position - hit
-	_drag_offset.z = 0.0
-	_drag_target = global_position
-	set_process(true)
-
-## Retargets the in-flight drag to `hit_world`, clamped to world bounds. No-op
-## when no drag is in flight.
-func update_drag(hit_world: Vector3) -> void:
-	if not _dragging:
-		return
-	_drag_target = _clamp_to_bounds(hit_world + _drag_offset)
-
 func _process(delta: float) -> void:
-	# Driven on a clock, not from update_resize, so a drag that stops moving
-	# without releasing still catches its resolution up
-	if _resizing:
-		_tick_resolution(delta)
+	# Driven on a clock, not from update_resize, so a resize (or a transition tween
+	# sampling live sizes) that stops moving without releasing still catches its
+	# resolution up. _update_processing owns whether this runs at all.
+	_tick_resolution(delta)
 
-	if not _dragging:
-		return
 
-	# Drag moves the window in XY only; z stays owned by z_order so a mid-drag
-	# stack change (focus, window close) can't pull depth off the grid.
-	var next := global_position.lerp(_drag_target, 1.0 - exp(-follow_speed * delta))
-	global_position.x = next.x
-	global_position.y = next.y
+## Single owner of set_process: the resolution clock must run while either a
+## resize gesture or a solo transition is live. Every field write that changes
+## either must call this instead of set_process directly.
+func _update_processing() -> void:
+	set_process(_resizing or _transitioning)
 
-## Ends the drag, leaving the window wherever it settled.
-func stop_drag() -> void:
-	_dragging = false
-	# The other gesture may still need the tick
-	set_process(_resizing)
 
-## `pos` clamped into world_bounds on X and Y; Z is passed through untouched.
-func _clamp_to_bounds(pos: Vector3) -> Vector3:
-	pos.x = clamp(pos.x, world_bounds.position.x, world_bounds.end.x)
-	pos.y = clamp(pos.y, world_bounds.position.y, world_bounds.end.y)
-	return pos
+## Sets whether the manager is running a solo tween on this window, keeping the
+## resolution clock live for the duration. See [method _update_processing].
+func set_transitioning(on: bool) -> void:
+	_transitioning = on
+	_update_processing()
+
+## The window's resize plane at its CURRENT pose: the visible surface through the
+## window origin, facing along its normal. Rebuilt each frame so a window moved
+## mid-gesture (e.g. by locomotion) is measured against where it is now, not where
+## it was grabbed.
+func _live_resize_plane() -> Plane:
+	var xf := global_transform.orthonormalized()
+	return Plane(xf.basis.z, xf.origin)
+
+
+# --- Resize entry points ---------------------------------------------------
+# Two kinds of caller reach the resize policy:
+#   * Hand-gesture path: start_resize / update_resize / stop_resize /
+#     cancel_resize, driven frame by frame from _on_handle_pointer_event as the
+#     user drags a handle.
+#   * Programmatic path: resize -> WindowManager.resize_window ->
+#     _commit_requested_size, called by solo logic and window creation, with no
+#     hand involved (the tween also calls _apply_presented_geometry directly).
+# Both converge on _commit_requested_size (clamp policy + authoritative size
+# field) and then _apply_presented_geometry (paint the geometry).
 
 ## Starts a resize on `handle` ("L", "R", "B", "BL" or "BR") from the grab
 ## described by `event`. No-op when the pointer ray misses the window's plane.
+## Hand-gesture entry, from _on_handle_pointer_event.
 func start_resize(handle: String, event: XRToolsPointerEvent) -> void:
-	# Freeze the gesture plane after focusing (focus can raise the window by
-	# n*Z_STEP) and resolve the baseline against that same plane, so the
-	# baseline and later MOVED frames agree.
+	# Focus, then anchor the grab in the window's own frame (to_local) so later
+	# frames can re-measure against the live window.
 	focus()
-	_resize_plane = _get_plane()
-	var hit = _resolve_pointer_hit(event, _resize_plane)
+	# Gate on the manager's interaction state after focus (a docked focus request
+	# always succeeds, so the pressed window qualifies): a suspended sibling or a
+	# window mid-transition must not resize itself.
+	if manager and not manager.can_interact(self):
+		return
+	var hit = _resolve_pointer_hit(event, _live_resize_plane())
 	if hit == null:
 		return
-	_resizing          = true
-	_resize_handle     = handle
-	_resize_start_hit  = hit
-	_resize_start_size = content_size
-	_resize_start_pos  = global_position
-	set_process(true)
+	# Take exclusive resize ownership before storing any gesture state; a refusal
+	# (another window is already resizing) leaves this window untouched.
+	if manager and not manager.acquire_resize(self):
+		return
+	_resizing           = true
+	_resize_handle      = handle
+	_resize_start_local = to_local(hit)
+	_resize_start_size  = _presentation_size()
+	# Freeze the width cap: exclusive ownership means no other window's width
+	# changes, so it stays valid for the whole gesture.
+	_resize_max_width   = manager.max_content_width_for(self) if manager else MAX_CONTENT_SIZE.x
+	_update_processing()
 
 
-## Resizes the window to follow the pointer at `hit_world`, keeping the edges
-## the grabbed handle does not own pinned. No-op when no resize is in flight.
+## Resizes the window to follow the pointer at `hit_world`, keeping the content
+## centre fixed and growing symmetrically. No-op when no resize is in flight.
+## Hand-gesture entry, from _on_handle_pointer_event.
 func update_resize(hit_world: Vector3) -> void:
 	if not _resizing:
 		return
-	# NOTE: Assumes window is unrotated (world XY == window XY)
-	var delta := Vector2(
-		hit_world.x - _resize_start_hit.x,
-		hit_world.y - _resize_start_hit.y
-	)
-	var new_size := _resize_start_size
-	# The screens are centred on the window, so a size change alone walks both
-	# edges outward by half of it. Every handle therefore also shifts the window
-	# by that same half, which is what pins the edge opposite the one grabbed.
-	# This sign maps that size change to the shift's direction: +1 on an axis
-	# whose positive edge the handle owns.
-	var shift_sign := Vector2.ZERO
+	# Displacement from the grab, both points window-local so any rigid motion since
+	# the grab cancels out. Fixed-centre rule: the grabbed edge follows the pointer
+	# and the opposite edge mirrors it, so the dimension changes by twice the
+	# displacement. Route through the internal policy directly (not the public
+	# resize(), which cancels gestures) so the managed clamp can't be bypassed.
+	var d := to_local(hit_world) - _resize_start_local
+	var dx := d.x
+	var dy := d.y
+	var dw := 0.0
+	var dh := 0.0
+	match _resize_handle:
+		"R":
+			dw = 2.0 * dx
+		"L":
+			dw = -2.0 * dx
+		"B":
+			dh = -2.0 * dy
+		"BR":
+			dw = 2.0 * dx
+			dh = -2.0 * dy
+		"BL":
+			dw = -2.0 * dx
+			dh = -2.0 * dy
 
-	if _resize_handle == "R":
-		new_size.x += delta.x
-		shift_sign.x = 1.0
-	elif _resize_handle == "L":
-		new_size.x -= delta.x
-		shift_sign.x = -1.0
-	elif _resize_handle == "B":
-		new_size.y -= delta.y
-		shift_sign.y = -1.0
-	elif _resize_handle == "BR":
-		new_size.x += delta.x
-		new_size.y -= delta.y
-		shift_sign = Vector2(1.0, -1.0)
-	elif _resize_handle == "BL":
-		new_size.x -= delta.x
-		new_size.y -= delta.y
-		shift_sign = Vector2(-1.0, -1.0)
+	_commit_requested_size(_resize_start_size + Vector2(dw, dh), true)
 
-	var clamped := new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
-	# Measured against the size actually applied, not the pointer delta: past a
-	# clamp the pointer keeps moving while the size does not, and a shift still
-	# tracking the pointer would drag the pinned edge along with it.
-	var pos_shift := (clamped - _resize_start_size) * shift_sign / 2.0
-	# Apply the shift in XY only; z stays owned by z_order so a stale
-	# _resize_start_pos.z can't leak back in after a mid-resize stack change.
-	# NOTE: Assumes window is unrotated (basis maps XY shift to world XY).
-	var shifted := _resize_start_pos + \
-		global_transform.basis * Vector3(pos_shift.x, pos_shift.y, 0.0)
-	global_position.x = shifted.x
-	global_position.y = shifted.y
-	_apply_size(clamped, true)
+
+## Shared resize teardown: drops the resize flag and handle, releases resize
+## ownership, updates the process gate, and settles the geometry at the current
+## presentation size (whatever the live-resize throttle last committed). Both the
+## gesture stop and the cancel path run this; cancel layers its own extra state
+## resets on top. The affordance mark is driven purely by hover, so it is left
+## as-is — still shown if the ray is on the handle, cleared later by the handle's
+## own EXITED.
+func _end_resize() -> void:
+	_resizing      = false
+	_resize_handle = ""
+	if manager:
+		manager.release_resize(self)
+	_update_processing()
+	_apply_presented_geometry(_presentation_size())
+
+
+## Cancels any in-flight resize gesture: runs the shared teardown, then also
+## clears the grab anchor and frozen width cap so no later pointer frame can
+## resume the old drag. Does not revert the size already applied. No-op when not
+## resizing. Hand-gesture entry, from _on_handle_pointer_event.
+func cancel_resize() -> void:
+	if not _resizing:
+		return
+	_end_resize()
+	_resize_start_local = Vector3.ZERO
+	_resize_start_size  = Vector2.ZERO
+	_resize_max_width   = MAX_CONTENT_SIZE.x
 
 
 ## Ends the resize and settles the render resolutions at the final size.
+## Hand-gesture entry, from _on_handle_pointer_event.
 func stop_resize() -> void:
-	_resizing      = false
-	_resize_handle = ""
-	set_process(_dragging)
-	# Gesture over: settle exactly, whatever the throttle last committed
-	_apply_size(content_size)
+	_end_resize()
 
 
-## Resizes the window's content to `size`, clamped to MIN/MAX_CONTENT_SIZE.
-## For a one-off resize outside of a pointer drag, e.g. at creation.
-func resize(size: Vector2) -> void:
-	_apply_size(size)
+## Public programmatic resize entry to `desired`. Existing callers (tests, window
+## creation) use this. When managed it delegates to WindowManager.resize_window so
+## it inherits the state gate and the unconditional gesture cancel; unmanaged (a
+## headless fixture) it falls back to the numeric clamp. Not on the gesture path —
+## update_resize calls the internal policy directly, so this wrapper's cancel is
+## safe. Always settles the render resolutions: a programmatic resize is not a
+## drag frame.
+func resize(desired: Vector2) -> void:
+	if manager:
+		manager.resize_window(self, desired)
+	else:
+		content_size = desired.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
+		_apply_presented_geometry(content_size)
 
 
-## Resizes the window's content to `new_size`, clamped to MIN/MAX_CONTENT_SIZE,
-## and brings the header and both screens' geometry with it.
-##
-## Sole writer of size state. `live` omits the render resolutions; the caller
-## must call again without it to settle them.
-func _apply_size(new_size: Vector2, live: bool = false) -> void:
-	content_size = new_size.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
-	var header_size := Vector2(content_size.x, HEADER_HEIGHT)
+## The size this window currently presents at: its live solo size while it is the
+## manager's soloed window, otherwise its persistent content_size. Every "current
+## size" read goes through here so the solo and content sizes stay separate.
+func _presentation_size() -> Vector2:
+	if manager and manager.soloed_window == self:
+		return current_solo_size
+	return content_size
+
+
+## Resize policy layer: clamps `desired` for the current presentation mode and
+## writes the authoritative size field (current_solo_size or content_size), then
+## paints it. This is the layer that DECIDES the size; callers on both the gesture
+## and programmatic paths reach it, but it is not the public entry. `live` omits
+## the render resolutions, as in [method _apply_presented_geometry].
+func _commit_requested_size(desired: Vector2, live: bool = false) -> void:
+	if manager and manager.soloed_window == self:
+		# Solo path: clamp to solo safety limits and write the live solo size only.
+		current_solo_size = manager.clamp_solo_size(self, desired)
+		_apply_presented_geometry(current_solo_size, live)
+	elif manager:
+		content_size = manager.clamp_content_size(self, desired)
+		_apply_presented_geometry(content_size, live)
+	else:
+		# Standalone window (e.g. a headless test fixture): numeric clamp only.
+		content_size = desired.clamp(MIN_CONTENT_SIZE, MAX_CONTENT_SIZE)
+		_apply_presented_geometry(content_size, live)
+
+
+## Geometry layer: drives the quad, collision, header placement, resize handles
+## and affordances from `size`, and records it as [member _active_size] for the
+## resolution subsystem. It only PAINTS geometry — it does NOT decide or write
+## which persistent size field is authoritative (the caller owns that write) and
+## it does not re-clamp; callers pass an already-clamped size. `live` omits the
+## render resolutions; the caller must call again without it to settle them.
+func _apply_presented_geometry(size: Vector2, live: bool = false) -> void:
+	_active_size = size
+	var header_size := Vector2(size.x, HEADER_HEIGHT)
 
 	# Assigning screen_size drives the quad, the static body's translator and
 	# the collision shape as one, so they cannot disagree mid-gesture.
-	content_3d.screen_size = content_size
+	content_3d.screen_size = size
 	header_3d.screen_size = header_size
 	# Header sits on top of the content; both are centred on the window
-	header_3d.position.y = (content_size.y + HEADER_HEIGHT) / 2.0
+	header_3d.position.y = (size.y + HEADER_HEIGHT) / 2.0
 	_layout_resize_handles()
+	_layout_resize_affordances()
 
 	if live:
 		_res_pending = true
@@ -366,16 +493,14 @@ func _apply_size(new_size: Vector2, live: bool = false) -> void:
 ## Reallocates both render targets so each surface renders at its authored
 ## pixel density for the current content size.
 func _commit_resolution() -> void:
-	var header_size := Vector2(content_size.x, HEADER_HEIGHT)
-	content_3d.viewport_size = _viewport_resolution(content_size, PIXELS_PER_UNIT)
+	var header_size := Vector2(_active_size.x, HEADER_HEIGHT)
+	content_3d.viewport_size = _viewport_resolution(_active_size, PIXELS_PER_UNIT)
 	header_3d.viewport_size = _viewport_resolution(header_size, HEADER_PIXELS_PER_UNIT)
-	# Resizing a render target clears it, and the addon only re-arms the refill
-	# on its own throttle clock, which runs at an unrelated phase to this one —
-	# leaving the target blank long enough to read as a flash. Re-arm it here,
-	# on exactly the frames that reallocate.
+	# Resizing a render target clears it; the addon's own refill runs on an
+	# unrelated clock, so re-arm the redraw here to avoid a visible blank flash.
 	_request_redraw(content_3d)
 	_request_redraw(header_3d)
-	_res_basis = content_size
+	_res_basis = _active_size
 	_res_pending = false
 	_since_commit = 0.0
 
@@ -383,9 +508,8 @@ func _commit_resolution() -> void:
 ## Asks `surface` to redraw its viewport once on the coming frame.
 func _request_redraw(surface: XRToolsViewport2DIn3D) -> void:
 	var viewport := surface.get_node("Viewport") as SubViewport
-	# Assign unconditionally: the renderer resets its own copy after drawing and
-	# never writes back here, so skipping the write when the property already
-	# reads UPDATE_ONCE would skip the redraw
+	# Assign unconditionally: the renderer resets its own copy after drawing, so
+	# skipping the write when it already reads UPDATE_ONCE would skip the redraw.
 	viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
@@ -407,8 +531,8 @@ func _tick_resolution(delta: float) -> void:
 func _stretch_exceeded() -> bool:
 	if _res_basis.x <= 0.0 or _res_basis.y <= 0.0:
 		return true
-	return absf(content_size.x / _res_basis.x - 1.0) > MAX_STRETCH \
-			or absf(content_size.y / _res_basis.y - 1.0) > MAX_STRETCH
+	return absf(_active_size.x / _res_basis.x - 1.0) > MAX_STRETCH \
+			or absf(_active_size.y / _res_basis.y - 1.0) > MAX_STRETCH
 
 
 ## Render resolution for a screen of `size` world units at `ppu` pixels per
@@ -421,10 +545,14 @@ func _viewport_resolution(size: Vector2, ppu: float) -> Vector2:
 ## Invoked when a resize handle's pointer event signal is received
 func _on_handle_pointer_event(handle_id: String, event: XRToolsPointerEvent) -> void:
 	match event.event_type:
+		XRToolsPointerEvent.Type.ENTERED:
+			_set_handle_hovered(handle_id, event.pointer, true)
+		XRToolsPointerEvent.Type.EXITED:
+			_set_handle_hovered(handle_id, event.pointer, false)
 		XRToolsPointerEvent.Type.PRESSED:
 			start_resize(handle_id, event)
 		XRToolsPointerEvent.Type.MOVED:
-			var hit = _resolve_pointer_hit(event, _resize_plane)
+			var hit = _resolve_pointer_hit(event, _live_resize_plane())
 			if hit != null:
 				update_resize(hit)
 		XRToolsPointerEvent.Type.RELEASED:
@@ -465,10 +593,10 @@ func _build_resize_handles() -> void:
 
 ## Sizes and positions the handles to straddle the current content edges.
 func _layout_resize_handles() -> void:
-	var hw := content_size.x / 2.0
-	var hh := content_size.y / 2.0
-	var tx := minf(HANDLE_MAX_THICKNESS, content_size.x * HANDLE_THICKNESS_RATIO)
-	var ty := minf(HANDLE_MAX_THICKNESS, content_size.y * HANDLE_THICKNESS_RATIO)
+	var hw := _active_size.x / 2.0
+	var hh := _active_size.y / 2.0
+	var tx := minf(HANDLE_MAX_THICKNESS, _active_size.x * HANDLE_THICKNESS_RATIO)
+	var ty := minf(HANDLE_MAX_THICKNESS, _active_size.y * HANDLE_THICKNESS_RATIO)
 
 	# Each band is centred on its edge, so it reaches half its thickness outside
 	# the window and covers only half of it in content
@@ -499,11 +627,112 @@ func _place_handle(handle_id: String, lo: Vector2, hi: Vector2) -> void:
 	(col.shape as BoxShape3D).size = Vector3(hi.x - lo.x, hi.y - lo.y, HANDLE_DEPTH)
 
 
-## Closes the window: emits on_closed and frees the node.
+## Creates the affordance marks under "ResizeAffordances", one hidden group per
+## handle. Edge handles carry a single segment; the bottom corners carry two arms
+## meeting at the corner. Call once, after the handles exist.
+func _build_resize_affordances() -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color.WHITE
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var root := Node3D.new()
+	root.name = "ResizeAffordances"
+	add_child(root)
+
+	# Edge marks are one segment; each bottom corner is two arms. No top mark:
+	# the header owns that side and it has no handle.
+	var segment_counts := {"L": 1, "R": 1, "B": 1, "BL": 2, "BR": 2}
+	for handle_id in segment_counts:
+		var group := Node3D.new()
+		group.name = "Affordance" + handle_id
+		group.visible = false
+		for _i in segment_counts[handle_id]:
+			group.add_child(_make_affordance_segment(mat))
+		root.add_child(group)
+		_resize_affordances[handle_id] = group
+		_affordance_hovers[handle_id] = {}
+
+	_layout_resize_affordances()
+
+
+## A thin unshaded box with no collision, used as one affordance segment.
+func _make_affordance_segment(mat: StandardMaterial3D) -> MeshInstance3D:
+	var seg := MeshInstance3D.new()
+	seg.mesh = BoxMesh.new()
+	seg.material_override = mat
+	return seg
+
+
+## Positions the affordance marks over the current content edges, mirroring the
+## handle layout. No-op until the marks are built.
+func _layout_resize_affordances() -> void:
+	if _resize_affordances.is_empty():
+		return
+	var hw := _active_size.x / 2.0
+	var hh := _active_size.y / 2.0
+	var t := AFFORDANCE_THICKNESS
+	# Cap each mark to a fraction of its edge so the two bottom corners never
+	# overlap and no mark spans a whole side.
+	var len_x := minf(AFFORDANCE_LENGTH, _active_size.x * 0.4)
+	var len_y := minf(AFFORDANCE_LENGTH, _active_size.y * 0.4)
+
+	# Edge marks: centred on each side, none on top.
+	_place_segment(_resize_affordances["L"].get_child(0),
+			Vector3(-hw, 0.0, AFFORDANCE_Z), Vector3(t, len_y, t))
+	_place_segment(_resize_affordances["R"].get_child(0),
+			Vector3(hw, 0.0, AFFORDANCE_Z), Vector3(t, len_y, t))
+	_place_segment(_resize_affordances["B"].get_child(0),
+			Vector3(0.0, -hh, AFFORDANCE_Z), Vector3(len_x, t, t))
+
+	# Corner marks: a horizontal arm and a vertical arm meeting at each bottom
+	# corner. A signed arm length carries the direction it grows from the corner.
+	_layout_corner("BL", -hw, -hh, len_x, len_y, t)
+	_layout_corner("BR", hw, -hh, -len_x, len_y, t)
+
+
+## Lays out one corner mark: a horizontal arm of signed length `arm_x` and a
+## vertical arm of signed length `arm_y`, both growing from the corner (cx, cy).
+func _layout_corner(handle_id: String, cx: float, cy: float,
+		arm_x: float, arm_y: float, t: float) -> void:
+	var group: Node3D = _resize_affordances[handle_id]
+	_place_segment(group.get_child(0),
+			Vector3(cx + arm_x / 2.0, cy, AFFORDANCE_Z), Vector3(absf(arm_x), t, t))
+	_place_segment(group.get_child(1),
+			Vector3(cx, cy + arm_y / 2.0, AFFORDANCE_Z), Vector3(t, absf(arm_y), t))
+
+
+## Moves and resizes one affordance segment.
+func _place_segment(seg: MeshInstance3D, pos: Vector3, size: Vector3) -> void:
+	seg.position = pos
+	(seg.mesh as BoxMesh).size = size
+
+
+## Records whether `pointer` hovers `handle_id`, then shows the mark while any
+## pointer still hovers it. Per-pointer counting keeps one hand's exit from hiding
+## a mark the other hand is on. Unknown handle ids are ignored.
+func _set_handle_hovered(handle_id: String, pointer: Node3D, hovered: bool) -> void:
+	# Null-check while still untyped: assigning a missing key's null straight into
+	# a typed Dictionary would raise before the guard could run.
+	var raw = _affordance_hovers.get(handle_id)
+	if raw == null:
+		return
+	var hovers: Dictionary = raw
+	# Key by instance id, not the node itself, so a freed pointer never lingers as
+	# a live reference. 0 stands in for a null/synthetic pointer.
+	var key := pointer.get_instance_id() if is_instance_valid(pointer) else 0
+	if hovered:
+		hovers[key] = true
+	else:
+		hovers.erase(key)
+	var group := _resize_affordances.get(handle_id) as Node3D
+	if group:
+		group.visible = not hovers.is_empty()
+
+
+## Closes the window: emits closed and frees the node.
 func close() -> void:
-	# Cancel any in-flight gesture so a missed RELEASED can't leave stale state
-	_dragging = false
+	# Cancel any in-flight resize so a missed RELEASED can't leave stale state
 	_resizing = false
-	set_process(false)
-	on_closed.emit()
+	_update_processing()
+	closed.emit()
 	queue_free()

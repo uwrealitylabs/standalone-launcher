@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://bvreih82ndgtx"]
+
+[ext_resource type="PackedScene" uid="uid://mqg1bth77obk" path="res://project/compositor/compositor_screen.tscn" id="1_scr"]
+
+[node name="CompositorPoc" type="Node3D"]
+
+[node name="Screen" parent="." instance=ExtResource("1_scr")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, -1)

@@ -1,0 +1,12 @@
+[gd_scene load_steps=3 format=3 uid="uid://mqg1bth77obk"]
+
+[ext_resource type="Script" uid="uid://gej2tnjtvlxc" path="res://project/compositor/compositor_poc.gd" id="1_scr"]
+
+[sub_resource type="QuadMesh" id="QuadMesh_screen"]
+resource_local_to_scene = true
+size = Vector2(0.6, 0.6)
+
+[node name="CompositorScreen" type="MeshInstance3D"]
+visible = false
+mesh = SubResource("QuadMesh_screen")
+script = ExtResource("1_scr")

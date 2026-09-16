@@ -327,7 +327,12 @@ static func get_all_file_paths(folder_path: String) -> Array:
 	var dir = DirAccess.open(folder_path)
 
 	if dir == null:
-		printerr("Could not open directory: ", folder_path)
+		# A missing directory is expected off the board; only an unopenable one is an error.
+		if not DirAccess.dir_exists_absolute(folder_path):
+			print("FileUtils: %s does not exist; skipping it. Expected off Linux."
+					% folder_path)
+		else:
+			printerr("Could not open directory: ", folder_path)
 		return files
 
 	dir.list_dir_begin()

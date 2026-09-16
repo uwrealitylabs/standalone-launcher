@@ -27,16 +27,10 @@ func _ready():
 	# Add apps to UI
 	populate_apps(all_apps)
 
-	# A LineEdit only receives keys while it holds focus, and nothing else claims
-	# it, so without this the menu opens deaf to the keyboard.
+	# Open with the caret in the search bar so the menu can be typed into without a
+	# click first. Grabbed only here, at construction: re-grabbing on later focus
+	# changes cancelled the header close button's press and forced a second click.
 	search_bar.grab_focus()
-
-
-## Focus hook for the containing window. Returns the caret to the search bar so
-## the list can be filtered by typing.
-func on_window_focus_changed(focused: bool) -> void:
-	if focused:
-		search_bar.grab_focus()
 
 
 func populate_apps(apps_to_show: Dictionary[String, Dictionary]):
@@ -121,6 +115,9 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	# Make the whole panel clickable
 	var button = Button.new()
 	button.flat = true  # make an Invisible button over the panel
+	# Left focusable on purpose: FOCUS_NONE removes all hover/press feedback on the
+	# row, so pressing a row keeps keyboard focus. Resuming type-to-filter then costs
+	# one extra click on the search bar — an acceptable trade for visible feedback.
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	button.pressed.connect(_on_app_button_pressed.bind(app_data, app_name))
@@ -131,10 +128,6 @@ func create_app_list_item(app_name: String, app_data: Dictionary) -> PanelContai
 	return panel
 
 func _on_app_button_pressed(app_data: Dictionary, app_name: String):
-	# A press leaves focus on the row, which would stop the search bar receiving
-	# keys. Ahead of the launch guards, so an unlaunchable row restores it too.
-	search_bar.grab_focus()
-
 	if not app_data.has("Exec"):
 		return
 

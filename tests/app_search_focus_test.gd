@@ -3,8 +3,9 @@ extends SceneTree
 ## Verifies that the app browser's search bar can be typed into.
 ##
 ## A LineEdit only receives keys while it holds focus inside its own SubViewport.
-## This drives the real window manager rather than the menu alone, because the
-## focus handoff under test lives in SWindow.set_input_enabled.
+## The menu never grabs that focus itself: the search bar is focused only when the
+## user clicks it. This drives the real window manager rather than the menu alone,
+## because the keyboard routing under test lives in SWindow.set_input_enabled.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \
@@ -31,7 +32,7 @@ var _fixture_dir := ""
 
 ## The app menu's controller among the manager's windows, with its window.
 func _find_menu(wm: WindowManager) -> Array:
-	for win in wm.windows_list:
+	for win in wm.open_windows:
 		var inst = win.content_3d.get_scene_instance()
 		if inst and inst.has_method("populate_apps"):
 			return [win, inst]
@@ -39,8 +40,12 @@ func _find_menu(wm: WindowManager) -> Array:
 
 
 ## The XRToolsVirtualKeyboard2D inside the WindowManager's keyboard, or null.
+## The keyboard lives beneath KeyboardAnchor, not directly under the manager.
 func _find_keyboard(wm: WindowManager) -> XRToolsVirtualKeyboard2D:
-	for child in wm.get_children():
+	var anchor := wm.get_node_or_null("KeyboardAnchor")
+	if anchor == null:
+		return null
+	for child in anchor.get_children():
 		if child is XRToolsViewport2DIn3D:
 			var inst = child.get_scene_instance()
 			if inst is XRToolsVirtualKeyboard2D:
@@ -99,6 +104,25 @@ func _press_physical(win: SWindow, keycode: Key) -> void:
 	win.send_input(event)
 
 
+## Maps a point in the content SubViewport back onto its 3D input surface.
+func _viewport_to_world(surface: XRToolsViewport2DIn3D, point: Vector2) -> Vector3:
+	var shape := surface.get_node("StaticBody3D/CollisionShape3D") as CollisionShape3D
+	var local := Vector3(
+			(point.x / surface.viewport_size.x - 0.5) * surface.screen_size.x,
+			(0.5 - point.y / surface.viewport_size.y) * surface.screen_size.y,
+			0.0)
+	return shape.global_transform * local
+
+
+## Sends the same typed pointer event that HandPointer emits on the headset.
+func _send_hand_event(
+		body: Node3D,
+		pointer: HandPointer,
+		type: XRToolsPointerEvent.Type,
+		at: Vector3) -> void:
+	body.emit_signal("pointer_event", XRToolsPointerEvent.new(type, pointer, body, at, at))
+
+
 ## Writes one .desktop file per name in APPS and points SHARE_DIR_ENV at the
 ## tree holding them. Must run before the manager is built, since the menu scans
 ## on _ready.
@@ -155,17 +179,18 @@ func _initialize() -> void:
 			str(_rows(menu).size()))
 
 	var terminal_window: SWindow = null
-	for win in wm.windows_list:
+	for win in wm.open_windows:
 		if win != menu_window:
 			terminal_window = win
 	_report.check("a second window exists to compare against", terminal_window != null)
 
 	# The terminal is spawned last, so it is the focused window at startup. The
-	# search bar still holds GUI focus, which is per-viewport and independent.
+	# menu grabs its search bar once in _ready, so the bar holds GUI focus (which is
+	# per-viewport and independent) even though the terminal is the focused window.
 	_report.section("focus at startup")
 	_report.check("the terminal starts as the focused window",
 			wm.get_focused_window() != menu_window)
-	_report.check("the search bar already holds focus in its own viewport",
+	_report.check("the search bar holds focus from _ready",
 			menu.search_bar.has_focus())
 
 	_report.section("the menu takes focus")
@@ -203,33 +228,19 @@ func _initialize() -> void:
 			tabbed is Button and _row_buttons(menu).has(tabbed),
 			str(tabbed))
 
-	_report.section("pressing a row returns focus to the search bar")
-	# The row without an Exec goes first: its press cannot get past the launch
-	# guard, so focus coming back proves the re-grab runs ahead of that guard.
-	var quiet := _button_for(menu, NO_EXEC)
-	_report.check("the Exec-less row has a button", quiet != null)
-	quiet.pressed.emit()
-	await process_frame
-	_report.check("a row that cannot launch still hands focus back",
-			menu.search_bar.has_focus())
-
+	_report.section("pressing a row no longer pulls focus back to the search bar")
+	# The re-grab after a launch was removed: a press leaves focus on the row, and
+	# the search bar is refocused only by clicking it again.
 	var zulu := _button_for(menu, MATCHES_Z)
 	zulu.grab_focus()
 	zulu.pressed.emit()
 	await process_frame
-	_report.check("a row that does launch hands focus back",
-			menu.search_bar.has_focus())
-
-	# Focus is taken back on `pressed`, which a press released off the row never
-	# emits. Pinned so the gap stays a recorded trade-off rather than a surprise.
-	_report.section("known gap: a press released off the row")
-	zulu.grab_focus()
-	await process_frame
-	_report.check("focus stays on the row when no press completes",
+	_report.check("focus stays on the row after pressing it",
 			gui.gui_get_focus_owner() == zulu)
-	menu.search_bar.grab_focus()
 
 	_report.section("typing into the focused menu")
+	# Simulate the user clicking the search bar to give it focus before typing.
+	menu.search_bar.grab_focus()
 	kb.on_key_pressed("Z", 122, false)
 	await process_frame
 	_report.check("the search bar received the keystroke",
@@ -252,17 +263,41 @@ func _initialize() -> void:
 	_report.check("the search text is unchanged while the terminal is focused",
 			menu.search_bar.text == "z", menu.search_bar.text)
 
-	# Dropping GUI focus first is what makes this a test of the handoff: left
-	# alone the search bar would still hold focus and the check would pass with
-	# the notification removed.
-	_report.section("focus returns with the window")
+	# Re-focusing the window must not silently re-grab the search bar: focus is the
+	# user's to give by clicking, and the two-click close bug came from grabbing it
+	# on the focus change. Drop focus, then confirm focusing the window leaves it off.
+	_report.section("re-focusing the window does not restore the caret")
 	menu.search_bar.release_focus()
 	_report.check("the search bar starts this check without focus",
 			not menu.search_bar.has_focus())
 	menu_window.focus()
 	await process_frame
-	_report.check("re-focusing the window puts the caret back in the search bar",
+	_report.check("re-focusing the window leaves the search bar unfocused",
+			not menu.search_bar.has_focus())
+
+	_report.section("a hand click recovers from stale pre-solo pointer ownership")
+	var body := menu_window.content_3d.get_node("StaticBody3D") as Node3D
+	var stale_pointer := HandPointer.new()
+	var clicking_pointer := HandPointer.new()
+	var search_center: Vector2 = menu.search_bar.get_global_rect().get_center()
+	var search_at := _viewport_to_world(menu_window.content_3d, search_center)
+	_send_hand_event(body, stale_pointer, XRToolsPointerEvent.Type.ENTERED, search_at)
+	wm.solo_transition_duration = 0.0
+	wm.enter_solo(menu_window)
+	wm.exit_solo()
+	_report.check("the disabled collider can leave the old hand as mouse owner",
+			body.get("_mouse") == stale_pointer)
+	_send_hand_event(body, clicking_pointer, XRToolsPointerEvent.Type.PRESSED, search_at)
+	await process_frame
+	_report.check("the pressing hand takes mouse ownership",
+			body.get("_mouse") == clicking_pointer)
+	_report.check("the synthesized mouse press focuses the search bar",
 			menu.search_bar.has_focus())
+	_send_hand_event(body, clicking_pointer, XRToolsPointerEvent.Type.RELEASED, search_at)
+	_send_hand_event(body, clicking_pointer, XRToolsPointerEvent.Type.EXITED, search_at)
+	_send_hand_event(body, stale_pointer, XRToolsPointerEvent.Type.EXITED, search_at)
+	stale_pointer.free()
+	clicking_pointer.free()
 
 	_remove_tree(_fixture_dir)
 	OS.unset_environment(FileUtils.SHARE_DIR_ENV)
