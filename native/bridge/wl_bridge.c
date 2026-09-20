@@ -644,8 +644,8 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 {
 	/*
 	 * wl_shm requires both of these unconditionally -- wlr_shm_create asserts
-	 * on a list missing either. ARGB is therefore advertised but rejected at
-	 * acquire time; see wlb_frame_acquire.
+	 * on a list missing either. Both are also accepted at acquire time and
+	 * rendered opaque; see wlb_frame_acquire.
 	 */
 	static const uint32_t formats[] = {
 		DRM_FORMAT_ARGB8888,
@@ -770,16 +770,19 @@ int wlb_frame_acquire(wlb_server *server, wlb_frame *out)
 	}
 
 	/*
-	 * Wayland ARGB8888 is premultiplied, which StandardMaterial3D does not
-	 * expect, so the bridge renders XRGB only. Rejecting here rather than rendering
-	 * something subtly wrong; the log is rate-limited because a client that
-	 * picks ARGB picks it every frame.
+	 * The bridge renders every surface opaque: the converter forces alpha to 0xFF
+	 * and never blends, so XRGB8888 and ARGB8888 are byte-identical for opaque
+	 * pixels (both are B,G,R,{X|A} in memory). ARGB is accepted on that basis --
+	 * Cairo clients such as weston-terminal only ever emit ARGB8888. The known
+	 * limit: a genuinely translucent client renders as opaque premultiplied, i.e.
+	 * subtly dark on its translucent pixels. The log is rate-limited because a
+	 * client on an unsupported format picks it every frame.
 	 */
-	if (format != DRM_FORMAT_XRGB8888) {
+	if (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888) {
 		wlr_buffer_end_data_ptr_access(server->pending);
 		if (server->rejected_frames % 120 == 0) {
-			bridge_log("rejecting frame: format 0x%08x is not XRGB8888 "
-					"(%lu rejected so far)", format,
+			bridge_log("rejecting frame: format 0x%08x is not XRGB8888 or "
+					"ARGB8888 (%lu rejected so far)", format,
 					server->rejected_frames + 1);
 		}
 		server->rejected_frames++;

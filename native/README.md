@@ -117,9 +117,13 @@ enough to copy. Reading `current.buffer` later gets NULL.
 
 **`wl_shm` must advertise both ARGB8888 and XRGB8888.** The protocol mandates
 both, and `wlr_shm_create` asserts on a list missing either — advertising XRGB
-alone is not an option. The bridge therefore accepts both onto the wire and rejects
-ARGB frames at acquire time with a rate-limited log, because Wayland ARGB is
-premultiplied and `StandardMaterial3D` does not expect that.
+alone is not an option. The bridge accepts both at acquire time and renders every
+surface opaque: the converter forces alpha to `0xFF` and never blends, so the two
+formats are byte-identical for opaque pixels. The known limit is that a genuinely
+translucent client renders as opaque premultiplied — subtly dark on its
+translucent pixels — which is why Cairo clients such as `weston-terminal` display
+correctly (their windows are opaque). A frame on any other format is rejected at
+acquire time with a rate-limited log.
 
 **Frame callbacks go out on every path.** A client that never receives
 `frame_done` stops drawing, so `wlb_frame_release` sends it whether the frame
