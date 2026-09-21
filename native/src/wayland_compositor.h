@@ -81,6 +81,7 @@ public:
 	void set_keyboard_focus(bool focused);
 	void set_toplevel_activated(bool activated);
 	void set_initial_size(const Vector2i &size);
+	void set_output_scale(int scale);
 
 protected:
 	static void _bind_methods();

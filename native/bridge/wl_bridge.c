@@ -34,6 +34,19 @@
 #define WLB_COMPOSITOR_VERSION 6
 #define WLB_SHM_VERSION 1
 #define WLB_XDG_SHELL_VERSION 3
+/* v3 carries scale, done and release; name/description (v4) are not sent. */
+#define WLB_OUTPUT_VERSION 3
+
+/*
+ * Nominal geometry for the single advertised output. Nothing composites onto a
+ * real screen, so the mode and physical size are placeholders; only the scale
+ * (set separately) changes what a client renders.
+ */
+#define WLB_OUTPUT_PX_WIDTH 1920
+#define WLB_OUTPUT_PX_HEIGHT 1080
+#define WLB_OUTPUT_REFRESH_MHZ 60000
+#define WLB_OUTPUT_MM_WIDTH 340
+#define WLB_OUTPUT_MM_HEIGHT 190
 
 /*
  * Key repeat the keyboard advertises to the client, which owns repeat from
@@ -52,6 +65,17 @@ struct wlb_server {
 
 	struct wlr_compositor *compositor;
 	struct wlr_xdg_shell *xdg_shell;
+
+	/*
+	 * One static wl_output. A HiDPI client renders at output_scale, so its
+	 * buffer -- and the texture the bridge copies -- carries that many more
+	 * pixels. Bound resources are tracked so a mapped surface can be sent
+	 * wl_surface.enter, how a toolkit learns which output (and scale) it is on.
+	 * output_scale defaults to 1; wlb_set_output_scale opts into HiDPI.
+	 */
+	struct wl_global *output_global;
+	struct wl_list output_resources;
+	int32_t output_scale;
 
 	/*
 	 * One wl_seat with pointer + keyboard. The keyboard is a deviceless
@@ -216,6 +240,10 @@ static void send_frame_done(wlb_server *server)
 
 /* --- surface listeners ------------------------------------------------- */
 
+/* Defined with the rest of the output code; the map handler needs it here. */
+static void send_output_enter(wlb_server *server, struct wlr_surface *surface);
+
+
 static void handle_surface_commit(struct wl_listener *listener, void *data)
 {
 	wlb_server *server = wl_container_of(listener, server, surface_commit);
@@ -227,10 +255,15 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
 		return;
 	}
 
-	w = (uint32_t)(surface->current.buffer_width > 0 ?
-			surface->current.buffer_width : 0);
-	h = (uint32_t)(surface->current.buffer_height > 0 ?
-			surface->current.buffer_height : 0);
+	/*
+	 * Logical size, not buffer pixels (at scale 2 a 1612x982 buffer is an
+	 * 806x491 surface): pointer coordinates are surface-local, so input divides
+	 * by this. The frame path copies the full buffer separately.
+	 */
+	w = (uint32_t)(surface->current.width > 0 ?
+			surface->current.width : 0);
+	h = (uint32_t)(surface->current.height > 0 ?
+			surface->current.height : 0);
 	if (server->mapped && (w != server->width || h != server->height)) {
 		server->width = w;
 		server->height = h;
@@ -258,11 +291,13 @@ static void handle_surface_map(struct wl_listener *listener, void *data)
 	(void)data;
 	server->mapped = 1;
 	if (surface != NULL) {
-		server->width = (uint32_t)(surface->current.buffer_width > 0 ?
-				surface->current.buffer_width : 0);
-		server->height = (uint32_t)(surface->current.buffer_height > 0 ?
-				surface->current.buffer_height : 0);
+		/* Logical size, matching handle_surface_commit -- see the note there. */
+		server->width = (uint32_t)(surface->current.width > 0 ?
+				surface->current.width : 0);
+		server->height = (uint32_t)(surface->current.height > 0 ?
+				surface->current.height : 0);
 	}
+	send_output_enter(server, surface);
 	bridge_log("surface mapped: %ux%u", server->width, server->height);
 	push_event(server, WLB_EVENT_MAPPED, server->width, server->height);
 }
@@ -368,6 +403,14 @@ static void handle_xdg_surface_commit(struct wl_listener *listener, void *data)
 	 */
 	wlr_xdg_toplevel_set_size(server->toplevel, server->initial_width,
 			server->initial_height);
+	/*
+	 * Modern (wl_compositor v6) HiDPI path, set on the initial commit so the
+	 * client's first buffer is already scaled. Legacy toolkits ignore it and use
+	 * the wl_output.enter sent on map. Runtime changes go through
+	 * wlb_set_output_scale.
+	 */
+	wlr_surface_set_preferred_buffer_scale(server->surface,
+			server->output_scale);
 }
 
 
@@ -638,6 +681,94 @@ static int setup_seat(wlb_server *server)
 }
 
 
+/* --- output ------------------------------------------------------------- */
+
+static void output_handle_release(struct wl_client *client,
+		struct wl_resource *resource)
+{
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+
+static const struct wl_output_interface output_impl = {
+	.release = output_handle_release,
+};
+
+
+static void output_resource_destroy(struct wl_resource *resource)
+{
+	wl_list_remove(wl_resource_get_link(resource));
+}
+
+
+/*
+ * wl_output bind: advertise one fixed-mode output and its current scale. The
+ * geometry and mode are nominal; the scale is what a HiDPI client acts on, and
+ * the wl_surface.enter sent on map (send_output_enter) is what ties the surface
+ * to this output so the client reads that scale.
+ */
+static void output_bind(struct wl_client *client, void *data,
+		uint32_t version, uint32_t id)
+{
+	wlb_server *server = data;
+	struct wl_resource *resource = wl_resource_create(client,
+			&wl_output_interface, (int)version, id);
+
+	if (resource == NULL) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+	wl_resource_set_implementation(resource, &output_impl, server,
+			output_resource_destroy);
+	wl_list_insert(&server->output_resources, wl_resource_get_link(resource));
+
+	wl_output_send_geometry(resource, 0, 0, WLB_OUTPUT_MM_WIDTH,
+			WLB_OUTPUT_MM_HEIGHT, WL_OUTPUT_SUBPIXEL_UNKNOWN,
+			"WRL", "compositor", WL_OUTPUT_TRANSFORM_NORMAL);
+	if (version >= WL_OUTPUT_SCALE_SINCE_VERSION) {
+		wl_output_send_scale(resource, server->output_scale);
+	}
+	wl_output_send_mode(resource,
+			WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED,
+			WLB_OUTPUT_PX_WIDTH, WLB_OUTPUT_PX_HEIGHT, WLB_OUTPUT_REFRESH_MHZ);
+	if (version >= WL_OUTPUT_DONE_SINCE_VERSION) {
+		wl_output_send_done(resource);
+	}
+	/*
+	 * send_output_enter only fires on map, so a client that binds this output
+	 * after mapping would never hear the enter. Send it now for that case.
+	 */
+	if (server->mapped && server->surface != NULL
+			&& server->surface->resource != NULL
+			&& wl_resource_get_client(server->surface->resource) == client) {
+		wl_surface_send_enter(server->surface->resource, resource);
+	}
+}
+
+
+/*
+ * Enter every output the surface's client bound. With one output this is the
+ * signal a toolkit waits for before it trusts the output's scale, so a client
+ * that connected before wlb_set_output_scale still redraws at the right size.
+ */
+static void send_output_enter(wlb_server *server, struct wlr_surface *surface)
+{
+	struct wl_client *client;
+	struct wl_resource *output;
+
+	if (surface == NULL || surface->resource == NULL) {
+		return;
+	}
+	client = wl_resource_get_client(surface->resource);
+	wl_resource_for_each(output, &server->output_resources) {
+		if (wl_resource_get_client(output) == client) {
+			wl_surface_send_enter(surface->resource, output);
+		}
+	}
+}
+
+
 /* --- lifecycle ---------------------------------------------------------- */
 
 wlb_server *wlb_create(char *socket_out, size_t socket_len)
@@ -703,6 +834,23 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 
 	if (!setup_seat(server)) {
 		bridge_log("seat setup failed");
+		destroy_seat(server);
+		wl_display_destroy(server->display);
+		free(server);
+		return NULL;
+	}
+
+	/*
+	 * output_scale defaults to 1 (client's own resolution). The resource list
+	 * must exist before the first bind, which cannot happen until a client
+	 * connects after this returns.
+	 */
+	wl_list_init(&server->output_resources);
+	server->output_scale = 1;
+	server->output_global = wl_global_create(server->display,
+			&wl_output_interface, WLB_OUTPUT_VERSION, server, output_bind);
+	if (server->output_global == NULL) {
+		bridge_log("wl_output global creation failed");
 		destroy_seat(server);
 		wl_display_destroy(server->display);
 		free(server);
@@ -919,6 +1067,35 @@ void wlb_set_initial_size(wlb_server *server, uint32_t width, uint32_t height)
 }
 
 
+void wlb_set_output_scale(wlb_server *server, int32_t scale)
+{
+	struct wl_resource *output;
+
+	if (server == NULL || scale < 1) {
+		return;
+	}
+	server->output_scale = scale;
+	/* Runtime scale change for a live v6 surface; a surface not yet committed
+	 * gets it in handle_xdg_surface_commit instead. */
+	if (server->surface != NULL) {
+		wlr_surface_set_preferred_buffer_scale(server->surface, scale);
+	}
+	/*
+	 * Push the new scale to clients that already bound the output, then a done
+	 * to apply it atomically. A client that has not bound yet reads the value
+	 * in output_bind instead.
+	 */
+	wl_resource_for_each(output, &server->output_resources) {
+		if (wl_resource_get_version(output) >= WL_OUTPUT_SCALE_SINCE_VERSION) {
+			wl_output_send_scale(output, scale);
+		}
+		if (wl_resource_get_version(output) >= WL_OUTPUT_DONE_SINCE_VERSION) {
+			wl_output_send_done(output);
+		}
+	}
+}
+
+
 void wlb_destroy(wlb_server *server)
 {
 	if (server == NULL) {
@@ -933,6 +1110,10 @@ void wlb_destroy(wlb_server *server)
 	detach_surface(server);
 	if (server->xdg_shell != NULL) {
 		wl_list_remove(&server->new_toplevel.link);
+	}
+	/* Stop new binds; existing output resources are freed with their clients. */
+	if (server->output_global != NULL) {
+		wl_global_destroy(server->output_global);
 	}
 
 	/*

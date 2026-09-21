@@ -183,6 +183,8 @@ void WaylandCompositor::_bind_methods()
 			&WaylandCompositor::set_toplevel_activated);
 	ClassDB::bind_method(D_METHOD("set_initial_size", "size"),
 			&WaylandCompositor::set_initial_size);
+	ClassDB::bind_method(D_METHOD("set_output_scale", "scale"),
+			&WaylandCompositor::set_output_scale);
 
 	ADD_SIGNAL(MethodInfo("surface_mapped",
 			PropertyInfo(Variant::VECTOR2I, "size")));
@@ -459,6 +461,9 @@ Dictionary WaylandCompositor::get_stats() const
 	 * live query reads through, and the answer would always be (0, 0).
 	 */
 	out["surface_size"] = last_mapped_size;
+	// Buffer resolution (surface_size times the output scale). The only readout
+	// that shows whether a HiDPI render is live, since surface_size is logical.
+	out["texture_size"] = Vector2i((int32_t)tex_width, (int32_t)tex_height);
 
 	for (int64_t i = 0; i < convert_samples.size(); i++) {
 		sorted.push_back(convert_samples[i]);
@@ -612,4 +617,13 @@ void WaylandCompositor::set_initial_size(const Vector2i &size)
 		return;
 	}
 	wlb_set_initial_size(server, (uint32_t)size.x, (uint32_t)size.y);
+}
+
+
+void WaylandCompositor::set_output_scale(int scale)
+{
+	if (server == nullptr) {
+		return;
+	}
+	wlb_set_output_scale(server, (int32_t)scale);
 }

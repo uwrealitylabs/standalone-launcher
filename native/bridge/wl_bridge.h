@@ -148,6 +148,15 @@ void wlb_toplevel_set_activated(wlb_server *server, int activated);
 void wlb_set_initial_size(wlb_server *server, uint32_t width, uint32_t height);
 
 /*
+ * Integer scale the advertised wl_output reports. A HiDPI-aware client renders
+ * into a scale-times-larger buffer, so the copied frame carries more pixels than
+ * the logical size -- the lever for legible text at distance. 1 (the default) is
+ * the client's own resolution; values below 1 are ignored. Safe to call after
+ * clients bind: the new scale is pushed to them.
+ */
+void wlb_set_output_scale(wlb_server *server, int32_t scale);
+
+/*
  * Tears down clients, then the display, then bridge-owned buffers and the
  * socket. `server` is invalid afterwards. Passing NULL is a no-op.
  */

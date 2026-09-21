@@ -104,6 +104,9 @@ func _ready() -> void:
 		push_error("Wayland server did not start.")
 		_discard_compositor()
 		return
+	# Advertise a 2x output so a HiDPI client renders at twice the resolution,
+	# keeping small text legible at distance. Set before the client connects.
+	_compositor.set_output_scale(2)
 	_launch_client()
 
 

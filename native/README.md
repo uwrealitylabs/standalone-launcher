@@ -132,6 +132,19 @@ was accepted or rejected.
 **Process ownership is GDScript's.** The bridge never calls `waitpid`. See
 `project/compositor/compositor_poc.gd`.
 
+**Output scale is advertised two ways, and input stays logical.**
+`wlb_set_output_scale` drives HiDPI so a client renders its buffer at `scale×`
+(a legible terminal at distance). Legacy toolkits read it from `wl_output` — the
+bridge sends `wl_output.scale` and a `wl_surface.enter` on map; modern
+`wl_compositor` v6 clients read the per-surface `preferred_buffer_scale` the
+bridge also sets on map and on change. Either way the buffer, and so the texture,
+is `scale×` the surface, but pointer coordinates are surface-local (logical): the
+bridge tracks `surface->current.width/height`, not `buffer_width/height`, so UV
+input divides by the logical size. The frame path copies the full buffer
+separately. Note the default harness client, `weston-simple-shm`, binds no
+`wl_output` and sets no buffer scale, so it renders at 1× and does not exercise
+this path; drive scale with `weston-terminal` (`WRL_COMPOSITOR_CLIENT`) instead.
+
 ## In the launcher
 
 `project/compositor/compositor_screen.tscn` is the reusable half: a
