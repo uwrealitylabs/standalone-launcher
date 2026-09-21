@@ -3,13 +3,11 @@
 - **Status:** Draft
 - **Predecessor:** Compositor 0 (`docs/wayland-surfaces-phase-0.md`) — one-way display proven.
 - **Target:** Godot 4.5, OpenXR, arm64 Linux on the RB 5.
-- **Core branch:** `feat/compositor-1-input`, cut from `spike/xr-compositor-poc` (#27),
-  contains Milestones 1, 2 and 4 (bridge seat, translation, keyboard) — nothing that
-  touches `HandPointer` or `SWindow`.
-- **Integration branch:** `feat/compositor-1-swindow`, cut from
-  `feat/spatial-window-layout` (#28); merge the completed core branch, then add Milestones
-  3 and 5. Both edit files (`HandPointer`, `SWindow`) that #28 is itself changing, so they
-  land here against #28's versions rather than fighting a merge conflict later.
+- **Branch:** `feat/compositor-1-input`. The core work (Milestones 1, 2, 4 — bridge seat,
+  translation, keyboard) and the windowing branches it depended on have since merged, so the
+  separate integration branch is no longer needed: Milestones 3 and 5 land here directly,
+  against the merged `HandPointer` and `SWindow`. The branch split below is kept as
+  historical rationale.
 
 ## Context
 
@@ -30,6 +28,10 @@ The compositor is proven with a **lightweight interactive client** (`weston-term
 buffers (Compositor 3), both out of scope here.
 
 ### Dependency and delivery split
+
+> **Update:** the branches described here have merged; the two-branch mechanics below are
+> historical. The dependency reasoning (what M3 and M5 touch, and why) still holds — only
+> the branch-and-rebase choreography is obsolete. M3 and M5 land on `feat/compositor-1-input`.
 
 Milestones 1, 2 and 4 — bridge seat, translation, keyboard — depend only on the
 Compositor 0 spike (#27) and stay on `feat/compositor-1-input`. They add C API, a
