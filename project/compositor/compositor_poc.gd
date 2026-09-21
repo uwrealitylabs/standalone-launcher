@@ -89,7 +89,10 @@ func _ready() -> void:
 	# Built only here: an unsupported host has nothing to shade.
 	_material = StandardMaterial3D.new()
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# Rendered above 1:1 (see set_output_scale), so the sampler minifies: the mip
+	# chain and anisotropy keep the surface clean at distance and glancing angles.
+	_material.texture_filter = \
+			BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS_ANISOTROPIC
 	material_override = _material
 
 	_compositor = ClassDB.instantiate("WaylandCompositor")

@@ -362,6 +362,11 @@ bool WaylandCompositor::ensure_image(uint32_t width, uint32_t height)
 	if (image.is_null()) {
 		return false;
 	}
+	// The surface is rendered at the output scale, so its buffer is larger than
+	// the quad's on-screen size at any working distance -- the sampler is always
+	// minifying. A mip chain is what makes that downsample clean instead of
+	// aliased; pump_frame rebuilds it per frame to match this mipmapped texture.
+	image->generate_mipmaps();
 	if (texture.is_valid()) {
 		texture->set_image(image);
 	} else {
@@ -413,6 +418,9 @@ void WaylandCompositor::pump_frame()
 		} else {
 			image->set_data((int32_t)frame.width, (int32_t)frame.height, false,
 					Image::FORMAT_RGBA8, pixels);
+			// Rebuild the mip chain for this frame; the texture is mipmapped, so
+			// update() needs a mipmapped image to match.
+			image->generate_mipmaps();
 			texture->update(image);
 			accepted = true;
 		}
