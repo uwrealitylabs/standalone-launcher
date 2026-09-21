@@ -42,9 +42,10 @@ const AUTHORED_QUAD_SIZE := Vector2(0.6, 0.6)
 # eye height, so tests/linux/ camera setups frame it without being told to.
 const HARNESS_ORIGIN := Vector3(0.0, 1.2, -1.0)
 
-# Where root.tscn puts it: to the right of the terminal window, from the
-# player's point of view.
-const LAUNCHER_ORIGIN := Vector3(1.6, 4.5, -2.0)
+# Where root.tscn puts it: centred in front of the player at eye height, scaled
+# up so the terminal stays legible at this depth. Only the origin is asserted;
+# the basis scale is a live visual-tuning knob and deliberately not pinned.
+const LAUNCHER_ORIGIN := Vector3(0.0, 2.5, -2.0)
 
 # Node path get_state() reports for the launcher's instance, minus the leading
 # "./" that SceneState prefixes onto every path.

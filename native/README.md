@@ -152,17 +152,18 @@ this path; drive scale with `weston-terminal` (`WRL_COMPOSITOR_CLIENT`) instead.
 
 | Scene | Node | At |
 |---|---|---|
-| `project/main/root.tscn` | `WindowManager/CompositorScreen` | `(1.6, 1.5, -2.0)` |
+| `project/main/root.tscn` | `WindowManager/CompositorScreen` | `(0, 2.5, -2.0)`, 2× scale |
 | `project/compositor/compositor_poc.tscn` | `Screen` | `(0, 1.2, -1)` |
 
 A fixed quad and nothing more, deliberately not an `SWindow`: no input, focus,
 resizing, z-ordering or second surface. Its `mesh` is `resource_local_to_scene`,
 so the runtime re-aspect in one instance cannot resize the other's.
 
-The launcher position clears the startup windows, which span x = -1.5 to 1.05;
-`weston-simple-shm`'s square surface makes a quad spanning 1.3 to 1.9. That is a
-fact about this client, not a guarantee — `_apply_aspect` widens the quad with
-the surface, and anything past about 1.8:1 would reach back over the terminal.
+The launcher origin and node scale are a live visual-tuning knob (legibility of
+the terminal at distance), not a fixed contract — only the origin is pinned by
+`tests/compositor_scene_check.gd`, and the basis scale is deliberately left free.
+`_apply_aspect` widens the quad with the surface, so a wide client can reach past
+the authored bounds; size and place it against the startup windows accordingly.
 
 Two independent rules keep it invisible where it cannot work: `visible = false`
 is serialized into the scene rather than applied in `_ready`, and `visible`
