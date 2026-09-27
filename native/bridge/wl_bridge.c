@@ -54,6 +54,8 @@
  */
 #define WLB_REPEAT_RATE_HZ 25
 #define WLB_REPEAT_DELAY_MS 600
+/* evdev KEY_MAX + 1; codes at or above it are ignored. */
+#define WLB_KEYCODE_LIMIT 0x300
 
 
 struct wlb_server {
@@ -83,7 +85,8 @@ struct wlb_server {
 	 * seat advertises on focus; key edges are injected through the seat, and
 	 * the bridge owns the xkb_state it derives modifiers from. last_mods is
 	 * the last modifier mask sent, so a key that changes nothing sends no
-	 * redundant wl_keyboard.modifiers.
+	 * redundant wl_keyboard.modifiers. held_keys marks the evdev codes pressed
+	 * and not yet released, so a focus clear can release them from xkb_state.
 	 */
 	struct wlr_seat *seat;
 	struct wlr_keyboard keyboard;
@@ -91,6 +94,7 @@ struct wlb_server {
 	struct xkb_keymap *xkb_keymap;
 	struct xkb_state *xkb_state;
 	struct wlr_keyboard_modifiers last_mods;
+	unsigned char held_keys[WLB_KEYCODE_LIMIT];
 	int seat_ready;
 
 	/* Size the toplevel is configured with on initial commit; 0x0 = client's own. */
@@ -242,6 +246,8 @@ static void send_frame_done(wlb_server *server)
 
 /* Defined with the rest of the output code; the map handler needs it here. */
 static void send_output_enter(wlb_server *server, struct wlr_surface *surface);
+/* Defined with the seat code; the unmap and teardown paths need it here. */
+static void clear_keyboard_focus(wlb_server *server);
 
 
 static void handle_surface_commit(struct wl_listener *listener, void *data)
@@ -314,8 +320,8 @@ static void handle_surface_unmap(struct wl_listener *listener, void *data)
 	 * the pointer or keyboard target. */
 	if (server->seat != NULL) {
 		wlr_seat_pointer_notify_clear_focus(server->seat);
-		wlr_seat_keyboard_notify_clear_focus(server->seat);
 	}
+	clear_keyboard_focus(server);
 	bridge_log("surface unmapped");
 	push_event(server, WLB_EVENT_UNMAPPED, 0, 0);
 }
@@ -351,8 +357,8 @@ static void teardown_client(wlb_server *server)
 	detach_surface(server);
 	if (server->seat != NULL) {
 		wlr_seat_pointer_notify_clear_focus(server->seat);
-		wlr_seat_keyboard_notify_clear_focus(server->seat);
 	}
+	clear_keyboard_focus(server);
 	server->surface = NULL;
 	server->toplevel = NULL;
 	server->mapped = 0;
@@ -607,6 +613,28 @@ static void sync_modifiers(wlb_server *server)
 
 
 /*
+ * Clears keyboard focus and releases every held key from xkb_state. The host
+ * stops forwarding keys once focus goes, so a modifier held across the clear
+ * would never see its release and would stay applied on the next enter.
+ */
+static void clear_keyboard_focus(wlb_server *server)
+{
+	if (!server->seat_ready) {
+		return;
+	}
+	wlr_seat_keyboard_notify_clear_focus(server->seat);
+	for (uint32_t code = 0; code < WLB_KEYCODE_LIMIT; code++) {
+		if (server->held_keys[code]) {
+			server->held_keys[code] = 0;
+			xkb_state_update_key(server->xkb_state, code + 8, XKB_KEY_UP);
+		}
+	}
+	/* No client has focus, so this only brings last_mods up to date. */
+	sync_modifiers(server);
+}
+
+
+/*
  * Frees the xkb objects and finishes the keyboard. The wlr_seat itself is owned
  * by the display and torn down with it, so it is not destroyed here. Idempotent.
  */
@@ -800,9 +828,7 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 	server->loop = wl_display_get_event_loop(server->display);
 
 	if (!resolve_runtime_dir(server) || !bind_socket(server)) {
-		wl_display_destroy(server->display);
-		free(server);
-		return NULL;
+		goto fail;
 	}
 
 	/*
@@ -815,29 +841,18 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 	if (wlr_shm_create(server->display, WLB_SHM_VERSION, formats,
 			sizeof(formats) / sizeof(formats[0])) == NULL) {
 		bridge_log("wlr_shm_create failed");
-		wl_display_destroy(server->display);
-		free(server);
-		return NULL;
+		goto fail;
 	}
 	server->xdg_shell = wlr_xdg_shell_create(server->display,
 			WLB_XDG_SHELL_VERSION);
 	if (server->compositor == NULL || server->xdg_shell == NULL) {
 		bridge_log("compositor or xdg-shell creation failed");
-		wl_display_destroy(server->display);
-		free(server);
-		return NULL;
+		goto fail;
 	}
-
-	server->new_toplevel.notify = handle_new_toplevel;
-	wl_signal_add(&server->xdg_shell->events.new_toplevel,
-			&server->new_toplevel);
 
 	if (!setup_seat(server)) {
 		bridge_log("seat setup failed");
-		destroy_seat(server);
-		wl_display_destroy(server->display);
-		free(server);
-		return NULL;
+		goto fail;
 	}
 
 	/*
@@ -851,11 +866,16 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 			&wl_output_interface, WLB_OUTPUT_VERSION, server, output_bind);
 	if (server->output_global == NULL) {
 		bridge_log("wl_output global creation failed");
-		destroy_seat(server);
-		wl_display_destroy(server->display);
-		free(server);
-		return NULL;
+		goto fail;
 	}
+
+	/*
+	 * Attached last, once nothing can fail: xdg-shell asserts on destroy if a
+	 * listener is still attached, so wlb_destroy removes it only when set.
+	 */
+	server->new_toplevel.notify = handle_new_toplevel;
+	wl_signal_add(&server->xdg_shell->events.new_toplevel,
+			&server->new_toplevel);
 
 	if (socket_out != NULL && socket_len > 0) {
 		snprintf(socket_out, socket_len, "%s", server->socket);
@@ -863,6 +883,11 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 	bridge_log("wayland server up on %s/%s (wlroots %s)",
 			server->runtime_dir, server->socket, wlb_version());
 	return server;
+
+fail:
+	/* wlb_destroy tolerates a partly built server, including the runtime dir. */
+	wlb_destroy(server);
+	return NULL;
 }
 
 
@@ -1014,9 +1039,14 @@ void wlb_pointer_button(wlb_server *server, uint32_t button, int pressed)
 
 void wlb_keyboard_key(wlb_server *server, uint32_t keycode, int pressed)
 {
-	if (server == NULL || !server->seat_ready) {
+	if (server == NULL || !server->seat_ready || keycode >= WLB_KEYCODE_LIMIT) {
 		return;
 	}
+	/* A key held across a focus clear was already released there. */
+	if (!pressed && !server->held_keys[keycode]) {
+		return;
+	}
+	server->held_keys[keycode] = pressed ? 1 : 0;
 	wlr_seat_keyboard_notify_key(server->seat, now_msec(), keycode,
 			pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
 					: WL_KEYBOARD_KEY_STATE_RELEASED);
@@ -1042,8 +1072,9 @@ void wlb_keyboard_focus(wlb_server *server, int focused)
 		/* No keys are tracked as held across a focus change. */
 		wlr_seat_keyboard_notify_enter(server->seat, server->surface,
 				NULL, 0, &mods);
+		server->last_mods = mods;
 	} else {
-		wlr_seat_keyboard_notify_clear_focus(server->seat);
+		clear_keyboard_focus(server);
 	}
 }
 
@@ -1051,6 +1082,14 @@ void wlb_keyboard_focus(wlb_server *server, int focused)
 void wlb_toplevel_set_activated(wlb_server *server, int activated)
 {
 	if (server == NULL || server->toplevel == NULL) {
+		return;
+	}
+	/*
+	 * wlroots asserts on a configure before the initial commit or after a
+	 * null-buffer unmap resets the surface. Nothing is lost: the host resends
+	 * activated once the surface maps again.
+	 */
+	if (!server->toplevel->base->initialized) {
 		return;
 	}
 	wlr_xdg_toplevel_set_activated(server->toplevel, activated);
@@ -1108,7 +1147,7 @@ void wlb_destroy(wlb_server *server)
 
 	drop_pending(server);
 	detach_surface(server);
-	if (server->xdg_shell != NULL) {
+	if (server->new_toplevel.notify != NULL) {
 		wl_list_remove(&server->new_toplevel.link);
 	}
 	/* Stop new binds; existing output resources are freed with their clients. */
