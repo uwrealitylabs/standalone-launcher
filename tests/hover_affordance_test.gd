@@ -5,7 +5,9 @@ extends SceneTree
 ##
 ## HandPointer delivers XRToolsPointerEvent ENTERED/EXITED to the collider under
 ## the ray, one pair per target change and in that order (exit the old, enter the
-## new), alongside its public hover signals. It never retargets mid-pinch.
+## new), alongside its public hover signals. Unpressed hover MOVED follows the
+## collision point; a pinch holds the target, and drag MOVED keeps coming from its
+## facing plane after the ray leaves the collider, with no EXITED until release.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \
@@ -29,10 +31,13 @@ const EPS := 0.0001
 var _report := Report.new()
 # Ordered log of XR events the hover targets received, as "<name>:<type>".
 var _events: Array[String] = []
+# Every XR event the hover targets received, in order, for position checks.
+var _raw: Array[XRToolsPointerEvent] = []
 
 
 func _initialize() -> void:
 	await _check_hover_routing()
+	await _check_pointer_lifecycle()
 	await _check_configured_pickability()
 	_report.finish(self)
 
@@ -68,8 +73,8 @@ func _check_hover_routing() -> void:
 	_events.clear()
 	_aim(ray, Vector3(-1, 0, 0))
 	hp._process_hit_test()
-	_report.check("entering A sends exactly one ENTERED to A", _events == ["A:enter"],
-			str(_events))
+	_report.check("entering A sends ENTERED then one MOVED to A",
+			_events == ["A:enter", "A:move"], str(_events))
 
 	# Re-run on the same target: no duplicate events.
 	_events.clear()
@@ -80,8 +85,8 @@ func _check_hover_routing() -> void:
 	_events.clear()
 	_aim(ray, Vector3(1, 0, 0))
 	hp._process_hit_test()
-	_report.check("switching to B exits A then enters B", _events == ["A:exit", "B:enter"],
-			str(_events))
+	_report.check("switching to B exits A then enters B",
+			_events == ["A:exit", "B:enter", "B:move"], str(_events))
 
 	# Pinch locks the target: aiming away must not retarget or emit.
 	_events.clear()
@@ -126,6 +131,79 @@ func _check_hover_routing() -> void:
 	await process_frame
 
 
+## Walks one hand through hover, press, an off-collider drag and release on a
+## single body, checking event order, which position source each phase uses, and
+## that each MOVED carries the previous position as `last_position`.
+func _check_pointer_lifecycle() -> void:
+	_report.section("pointer lifecycle")
+
+	var rig := Node3D.new()
+	var ray := RayCast3D.new()
+	ray.name = "RayCast3D"
+	ray.collision_mask = HOVER_LAYER
+	ray.target_position = Vector3(0, 0, -5)
+	ray.enabled = true
+	rig.add_child(ray)
+	var hp := HandPointer.new()
+	rig.add_child(hp)
+	root.add_child(rig)
+	hp.set_process(false)
+
+	# The box's front face is at z = -1.95; its facing plane is z = -2.
+	var a := _hover_body("A", Vector3(0, 0, -2))
+	root.add_child(a)
+	await physics_frame
+	await physics_frame
+
+	_events.clear()
+	_raw.clear()
+	_aim(ray, Vector3(0, 0, 0))
+	hp._process_hit_test()
+	# Holding still produces no motion.
+	hp._process_hit_test()
+	_aim(ray, Vector3(0.1, 0, 0))
+	hp._process_hit_test()
+	_report.check("hover enters, then moves only when the point changes",
+			_events == ["A:enter", "A:move", "A:move"], str(_events))
+	var hover: XRToolsPointerEvent = _raw[2]
+	_report.check("hover MOVED is at the collision point",
+			hover.position.is_equal_approx(Vector3(0.1, 0, -1.95)), str(hover.position))
+	_report.check("hover MOVED carries the previous hover point",
+			hover.last_position.is_equal_approx(Vector3(0, 0, -1.95)),
+			str(hover.last_position))
+
+	# Press on the collider, then drag the ray off it (A spans x = +/-0.3).
+	_events.clear()
+	_raw.clear()
+	hp._process_tap(1.0)
+	_aim(ray, Vector3(0.2, 0, 0))
+	hp._process_hit_test()
+	hp._process_tap(1.0)
+	_aim(ray, Vector3(1.0, 0, 0))
+	hp._process_hit_test()
+	hp._process_tap(1.0)
+	_report.check("a held press sends PRESSED then drag MOVEDs, no hover events",
+			_events == ["A:press", "A:move", "A:move"], str(_events))
+	var off: XRToolsPointerEvent = _raw[2]
+	_report.check("drag MOVED off the collider is on A's plane",
+			off.position.is_equal_approx(Vector3(1.0, 0, -2)), str(off.position))
+	_report.check("drag MOVED carries the previous drag point",
+			off.last_position.is_equal_approx(Vector3(0.2, 0, -2)), str(off.last_position))
+	_report.check("the target is kept while pressed off the collider",
+			hp._current_target == a)
+
+	# Release off the collider, then the next hover pass exits A.
+	_events.clear()
+	hp._process_tap(0.0)
+	hp._process_hit_test()
+	_report.check("release off the collider sends RELEASED, then EXITED",
+			_events == ["A:release", "A:exit"], str(_events))
+
+	rig.queue_free()
+	a.queue_free()
+	await process_frame
+
+
 ## A StaticBody3D on HOVER_LAYER named `name`, at `pos`, that records the XR
 ## events it receives into `_events`.
 func _hover_body(name: String, pos: Vector3) -> StaticBody3D:
@@ -150,8 +228,10 @@ func _record(name: String, ev: XRToolsPointerEvent) -> void:
 	var kind := "enter" if ev.event_type == XRToolsPointerEvent.Type.ENTERED else \
 			"exit" if ev.event_type == XRToolsPointerEvent.Type.EXITED else \
 			"press" if ev.event_type == XRToolsPointerEvent.Type.PRESSED else \
-			"release" if ev.event_type == XRToolsPointerEvent.Type.RELEASED else "other"
+			"release" if ev.event_type == XRToolsPointerEvent.Type.RELEASED else \
+			"move" if ev.event_type == XRToolsPointerEvent.Type.MOVED else "other"
 	_events.append("%s:%s" % [name, kind])
+	_raw.append(ev)
 
 
 ## Aims `ray` straight down -Z from `origin`, so it hits whatever sits on that

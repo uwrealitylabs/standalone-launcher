@@ -8,6 +8,10 @@ signal pointer_entered(target: Node)
 ## Emitted when the ray stops hitting a target
 signal pointer_exited(target: Node)
 
+# Colliders also receive an XRToolsPointerEvent stream, in this order: ENTERED,
+# hover MOVED, PRESSED, drag MOVED, RELEASED, EXITED. A pressed target keeps
+# receiving drag MOVED and RELEASED even after the ray leaves it.
+
 ## How close thumb and index need to be to count as a tap
 @export_range(0.0, 1.0) var pinch_threshold: float = 0.8
 ## Cooldown between activations to prevent double-taps
@@ -126,6 +130,14 @@ func _process_hit_test():
 			_current_target = collider
 			_send_xr_event(XRToolsPointerEvent.Type.ENTERED, _current_target, hit_point)
 			pointer_entered.emit(_current_target)
+			# A MOVED at the entry point, as XR Tools' own pointer sends, so a
+			# viewport places its mouse before the hand moves.
+			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _current_target, hit_point)
+		elif hit_point != _last_hover_pos:
+			# Unpressed hover uses the collision point: leaving the collider is the
+			# EXITED edge, so hover never needs an off-collider coordinate.
+			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _current_target, hit_point,
+					_last_hover_pos)
 		# Cache the live hit so a later EXITED has a meaningful position.
 		_last_hover_pos = hit_point
 	else:
@@ -155,8 +167,9 @@ func _process_tap(pinch_value: float):
 	elif is_pinching and _was_pinching:
 		var hit = _locked_plane_hit()
 		if hit != null:
+			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _locked_target, hit,
+					_last_gesture_hit)
 			_last_gesture_hit = hit
-			_send_xr_event(XRToolsPointerEvent.Type.MOVED, _locked_target, hit)
 
 	elif not is_pinching and _was_pinching:
 		# Always deliver RELEASED so the receiver ends its gesture on select-up,
@@ -171,6 +184,11 @@ func _process_tap(pinch_value: float):
 
 ## Intersects the pointer ray with the locked target's facing plane. Returns
 ## null when there is no locked target or the ray misses the plane this frame.
+##
+## Press-through-release positions come from here, not the collision point: a
+## held press keeps its target after the ray leaves the collider, and only the
+## infinite plane still yields a coordinate there. On the collider the two agree
+## (tests/collision_zorder_parity_test.gd), so keep both sources.
 func _locked_plane_hit() -> Variant:
 	if not is_instance_valid(_locked_target):
 		return null
@@ -185,7 +203,9 @@ func _locked_plane_hit() -> Variant:
 	return Plane(t.basis.z, t.origin).intersects_ray(get_ray_origin(), get_ray_direction())
 
 
-func _send_xr_event(type: int, target: Node, pos: Vector3):
+## Emits an XRToolsPointerEvent on `target`, or its parent when only that has the
+## signal. `last_pos` is the previous position for MOVED; it defaults to `pos`.
+func _send_xr_event(type: int, target: Node, pos: Vector3, last_pos: Variant = null):
 	if not is_instance_valid(target): return
 
 	# find the parents Viewport node of a child node
@@ -195,7 +215,8 @@ func _send_xr_event(type: int, target: Node, pos: Vector3):
 			target_node = target_node.get_parent()
 
 	if target_node.has_signal("pointer_event"):
-		var ev = XRToolsPointerEvent.new(type, self, target_node, pos, Vector3.ZERO)
+		var last: Vector3 = pos if last_pos == null else last_pos
+		var ev = XRToolsPointerEvent.new(type, self, target_node, pos, last)
 		target_node.emit_signal("pointer_event", ev)
 
 
