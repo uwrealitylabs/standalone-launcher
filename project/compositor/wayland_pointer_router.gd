@@ -26,8 +26,9 @@ var _entered := false
 var _sent_uv := Vector2.ZERO
 
 
-## Routes one pointer event. `uv` is the event position in surface UV; it may
-## fall outside 0..1 while a pressed hand drags off the surface.
+## Routes one pointer event. `uv` is the event position in surface UV. It reaches
+## the seat outside 0..1 only during the owner's pressed drag; any other motion is
+## clamped onto the surface.
 func handle(pointer: Object, type: int, uv: Vector2) -> void:
 	match type:
 		XRToolsPointerEvent.Type.ENTERED:
@@ -92,7 +93,13 @@ func get_pointer_owner() -> Object:
 	return _owner
 
 
+## Moves the seat pointer to `uv`, which must be the owner's position.
 func _move_to(uv: Vector2) -> void:
+	# Only the implicit grab of a press may carry the pointer off the surface. A
+	# hand whose pinch was refused keeps reporting locked-plane points past the
+	# edge, and becomes the owner by handoff while still pinched.
+	if not _owner_pressed:
+		uv = uv.clamp(Vector2.ZERO, Vector2.ONE)
 	if not _entered:
 		_entered = true
 		_sent_uv = uv

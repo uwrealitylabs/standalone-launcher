@@ -11,6 +11,7 @@ extends SceneTree
 ##   - it follows the quad when a surface maps at a new aspect;
 ##   - world hits convert to UV under the placement root.tscn uses, including
 ##     past the edge during a pressed drag;
+##   - two hands pinching at once click once, with no stray button;
 ##   - unmapping forgets the hands.
 ##
 ## As in compositor_keyboard_routing_test.gd, autostart is off and a fake
@@ -95,6 +96,7 @@ func _initialize() -> void:
 
 	await _check_collider(screen)
 	_check_uv_path(screen, fake, ray, hp)
+	_check_two_hands(screen, fake, ray, hp)
 	await _check_hide_and_unmap(screen, fake, ray, hp)
 	_report.finish(self)
 
@@ -162,6 +164,52 @@ func _check_uv_path(screen: MeshInstance3D, fake: FakeCompositor, ray: RayCast3D
 	hp._process_hit_test()
 	_report.check("release sends button up, then the ray being off leaves",
 			_calls_match(fake.calls, [["up", null], ["leave", null]]), str(fake.calls))
+
+
+## A pinches, B pinches while A holds, A releases and leaves, then B drags off
+## the edge and releases. Real HandPointers, so this checks the event stream the
+## router's unit tests assume.
+func _check_two_hands(screen: MeshInstance3D, fake: FakeCompositor, ray: RayCast3D,
+		hp: HandPointer) -> void:
+	_report.section("two hands pinching at once")
+	var ray2 := RayCast3D.new()
+	ray2.name = "RayCast3D"
+	ray2.collision_mask = POINTER_LAYER
+	ray2.enabled = true
+	var hp2 := HandPointer.new()
+	var rig2 := Node3D.new()
+	rig2.add_child(ray2)
+	rig2.add_child(hp2)
+	root.add_child(rig2)
+	hp2.set_process(false)
+
+	fake.calls.clear()
+	_aim(screen, ray, Vector2(0.3, 0.5))
+	hp._process_hit_test()
+	_aim(screen, ray2, Vector2(0.7, 0.5))
+	hp2._process_hit_test()
+	hp._process_tap(1.0)
+	hp2._process_tap(1.0)
+	hp._process_tap(0.0)
+	_report.check("A's click goes through; B's overlapping pinch sends nothing",
+			_calls_match(fake.calls, [["enter", Vector2(0.3, 0.5)], ["down", null],
+					["up", null]]), str(fake.calls))
+
+	fake.calls.clear()
+	_aim(screen, ray, Vector2(1.3, 0.5))
+	hp._process_hit_test()
+	_aim(screen, ray2, Vector2(1.2, 0.5))
+	hp2._process_hit_test()
+	hp2._process_tap(1.0)
+	hp2._process_tap(0.0)
+	hp2._process_hit_test()
+	_report.check("A leaving hands the pointer to B, whose drag stays clamped on the "
+			+ "surface and whose release sends no button",
+			_calls_match(fake.calls, [["motion", Vector2(0.7, 0.5)],
+					["motion", Vector2(1.0, 0.5)], ["leave", null]]), str(fake.calls))
+	_report.check("nobody owns the pointer afterwards",
+			screen._pointer_router.get_pointer_owner() == null)
+	rig2.free()
 
 
 func _check_hide_and_unmap(screen: MeshInstance3D, fake: FakeCompositor, ray: RayCast3D,

@@ -45,6 +45,7 @@ func _initialize() -> void:
 	_check_claim_from_unpressed_owner()
 	_check_pressed_owner_is_kept()
 	_check_owner_exit_hands_off()
+	_check_overlapping_pinches()
 	_check_reset_and_strays()
 	_report.finish(self)
 
@@ -163,6 +164,129 @@ func _check_owner_exit_hands_off() -> void:
 	router.handle(_a, T.EXITED, Vector2(0.2, 0.2))
 	_report.check("a pressed owner's exit sends button up, then leave",
 			sink.calls == ["button 1 up", "leave"], str(sink.calls))
+
+
+## Both hands pinch on the surface, A first. A same-frame release is just one
+## order or the other, since each HandPointer runs its own _process.
+func _check_overlapping_pinches() -> void:
+	_report.section("two pinches overlap: the owner releases first")
+	var r: Array = _both_pinched()
+	var router: WaylandPointerRouter = r[0]
+	var sink: Sink = r[1]
+	router.handle(_a, T.RELEASED, Vector2(0.3, 0.2))
+	router.handle(_b, T.MOVED, Vector2(0.95, 0.8))
+	router.handle(_b, T.RELEASED, Vector2(0.95, 0.8))
+	_report.check("only the owner's press and release reach the seat",
+			sink.calls == ["enter (0.2, 0.2)", "button 1 down", "motion (0.3, 0.2)",
+					"button 1 up"], str(sink.calls))
+	_report.check("the owner keeps the pointer, unpressed", router.get_pointer_owner() == _a)
+	sink.calls.clear()
+	router.handle(_a, T.EXITED, Vector2(0.3, 0.2))
+	router.handle(_b, T.EXITED, Vector2(0.95, 0.8))
+	_report.check("afterwards, exits hand off and then leave as usual",
+			sink.calls == ["motion (0.95, 0.8)", "leave"], str(sink.calls))
+
+	_report.section("two pinches overlap: the refused hand releases first")
+	r = _both_pinched()
+	router = r[0]
+	sink = r[1]
+	router.handle(_b, T.RELEASED, Vector2(0.9, 0.8))
+	router.handle(_a, T.MOVED, Vector2(0.35, 0.2))
+	router.handle(_a, T.RELEASED, Vector2(0.35, 0.2))
+	_report.check("the refused release sends nothing; the owner's drag and up go through",
+			sink.calls == ["enter (0.2, 0.2)", "button 1 down", "motion (0.3, 0.2)",
+					"motion (0.35, 0.2)", "button 1 up"], str(sink.calls))
+	_report.check("buttons balance", _buttons_balance(sink))
+
+	_report.section("two pinches overlap: the owner releases and exits mid-pinch")
+	r = _both_pinched()
+	router = r[0]
+	sink = r[1]
+	router.handle(_a, T.RELEASED, Vector2(0.3, 0.2))
+	sink.calls.clear()
+	router.handle(_a, T.EXITED, Vector2(0.3, 0.2))
+	_report.check("the still-pinched hand takes the pointer, unpressed",
+			router.get_pointer_owner() == _b and sink.calls == ["motion (0.9, 0.8)"],
+			str(sink.calls))
+	# Its pinch never reached the seat, so its locked-plane drag arrives as hover,
+	# clamped onto the surface, and its release must not send a stray button up.
+	router.handle(_b, T.MOVED, Vector2(1.3, 0.8))
+	router.handle(_b, T.MOVED, Vector2(1.4, -0.2))
+	router.handle(_b, T.RELEASED, Vector2(1.4, -0.2))
+	router.handle(_b, T.EXITED, Vector2(1.4, -0.2))
+	_report.check("its drag is hover clamped to the edge, its release sends nothing",
+			sink.calls == ["motion (0.9, 0.8)", "motion (1.0, 0.8)", "motion (1.0, 0.0)",
+					"leave"], str(sink.calls))
+	_report.check("buttons balance and nobody owns the pointer",
+			_buttons_balance(sink) and router.get_pointer_owner() == null)
+	sink.calls.clear()
+	router.handle(_b, T.ENTERED, Vector2(0.5, 0.5))
+	router.handle(_b, T.PRESSED, Vector2(0.5, 0.5))
+	router.handle(_b, T.RELEASED, Vector2(0.5, 0.5))
+	_report.check("that hand's next pinch clicks normally",
+			sink.calls == ["enter (0.5, 0.5)", "button 1 down", "button 1 up"],
+			str(sink.calls))
+
+	r = _both_pinched()
+	router = r[0]
+	sink = r[1]
+	router.handle(_b, T.MOVED, Vector2(1.3, 1.2))
+	router.handle(_a, T.RELEASED, Vector2(0.3, 0.2))
+	sink.calls.clear()
+	router.handle(_a, T.EXITED, Vector2(0.3, 0.2))
+	_report.check("a handoff to a hand already past the edge lands on the edge",
+			sink.calls == ["motion (1.0, 1.0)"], str(sink.calls))
+
+	_report.section("two pinches overlap: the owner pinches again first")
+	r = _both_pinched()
+	router = r[0]
+	sink = r[1]
+	router.handle(_a, T.RELEASED, Vector2(0.3, 0.2))
+	router.handle(_a, T.PRESSED, Vector2(0.3, 0.2))
+	router.handle(_b, T.RELEASED, Vector2(0.9, 0.8))
+	router.handle(_a, T.RELEASED, Vector2(0.3, 0.2))
+	_report.check("the owner's second click goes through; the other release is dropped",
+			sink.calls == ["enter (0.2, 0.2)", "button 1 down", "motion (0.3, 0.2)",
+					"button 1 up", "button 1 down", "button 1 up"], str(sink.calls))
+
+	_report.section("two pinches overlap after a claim")
+	r = _router()
+	router = r[0]
+	sink = r[1]
+	router.handle(_a, T.ENTERED, Vector2(0.2, 0.2))
+	router.handle(_b, T.ENTERED, Vector2(0.8, 0.8))
+	router.handle(_b, T.PRESSED, Vector2(0.8, 0.8))
+	router.handle(_a, T.PRESSED, Vector2(0.2, 0.2))
+	router.handle(_b, T.RELEASED, Vector2(0.8, 0.8))
+	router.handle(_a, T.RELEASED, Vector2(0.2, 0.2))
+	_report.check("the claimer clicks once; the original owner's pinch is refused",
+			sink.calls == ["enter (0.2, 0.2)", "motion (0.8, 0.8)", "button 1 down",
+					"button 1 up"], str(sink.calls))
+	sink.calls.clear()
+	router.handle(_a, T.PRESSED, Vector2(0.25, 0.2))
+	router.handle(_a, T.RELEASED, Vector2(0.25, 0.2))
+	_report.check("the refused hand can claim back with a fresh pinch",
+			sink.calls == ["motion (0.25, 0.2)", "button 1 down", "button 1 up"]
+					and router.get_pointer_owner() == _a, str(sink.calls))
+
+
+## A router where A owns and holds a press and B's press was refused; B has since
+## dragged. Every call the setup made is left in the sink.
+func _both_pinched() -> Array:
+	var r: Array = _router()
+	var router: WaylandPointerRouter = r[0]
+	router.handle(_a, T.ENTERED, Vector2(0.2, 0.2))
+	router.handle(_b, T.ENTERED, Vector2(0.8, 0.8))
+	router.handle(_a, T.PRESSED, Vector2(0.2, 0.2))
+	router.handle(_b, T.PRESSED, Vector2(0.8, 0.8))
+	router.handle(_b, T.MOVED, Vector2(0.9, 0.8))
+	router.handle(_a, T.MOVED, Vector2(0.3, 0.2))
+	return r
+
+
+## Whether every button down the sink saw was matched by an up.
+func _buttons_balance(sink: Sink) -> bool:
+	return sink.calls.count("button 1 down") == sink.calls.count("button 1 up")
 
 
 func _check_reset_and_strays() -> void:
