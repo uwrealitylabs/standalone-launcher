@@ -205,6 +205,9 @@ func request_shutdown() -> void:
 	if _shutdown_requested:
 		return
 	_shutdown_requested = true
+	# Drop focus now rather than after the client exits, which can take the whole
+	# TERM grace: a closing surface must not keep taking keys.
+	_sync_focus()
 	if _client_pid == -1:
 		_finish_shutdown.call_deferred()
 		return
@@ -433,14 +436,15 @@ func route_virtual_key(event: InputEventKey) -> void:
 
 
 ## Brings keyboard focus and the xdg_toplevel activated state in line with the
-## mapped state and the host's gates, sending only what changed. Clearing on
-## unmap/gone mirrors the bridge's own defensive clear and, more importantly, stops
-## key routing once there is no live surface.
+## mapped state, a requested shutdown and the host's gates, sending only what
+## changed. Clearing on unmap/gone mirrors the bridge's own defensive clear and,
+## more importantly, stops key routing once there is no live surface.
 func _sync_focus() -> void:
 	if _compositor == null:
 		return
-	var focused := _mapped and _host_focused and _keys_routed
-	var activated := _mapped and _host_focused
+	var live := _mapped and not _shutdown_requested
+	var focused := live and _host_focused and _keys_routed
+	var activated := live and _host_focused
 	if focused != _focused:
 		_focused = focused
 		_compositor.set_keyboard_focus(focused)

@@ -12,6 +12,8 @@ extends SceneTree
 ##   - real (USB) key events reach send_physical_key while focused;
 ##   - virtual-keyboard taps reach send_virtual_key while focused;
 ##   - nothing is forwarded once the surface is unfocused;
+##   - requesting shutdown drops focus and activation at once, before the client
+##     has exited;
 ##   - attaching the same virtual keyboard twice still delivers each tap once.
 ##
 ## autostart is turned off so the node never brings up a real Wayland server --
@@ -87,6 +89,7 @@ func _initialize() -> void:
 	_check_focus_clears(screen, fake)
 	await _check_no_routing_unfocused(screen, fake, keyboard)
 	await _check_attach_idempotent(screen, fake, keyboard)
+	_check_shutdown_drops_focus(screen, fake)
 
 	_report.finish(self)
 
@@ -169,6 +172,21 @@ func _check_attach_idempotent(screen: MeshInstance3D, fake: FakeCompositor,
 	_report.check("the tap was delivered exactly once",
 			fake.virtual.size() == virtual_before + 1,
 			str(fake.virtual.size() - virtual_before))
+
+
+func _check_shutdown_drops_focus(screen: MeshInstance3D, fake: FakeCompositor) -> void:
+	_report.section("requesting shutdown drops focus immediately")
+	var physical_before := fake.physical.size()
+	# Checked synchronously: with no client the teardown finishes a frame later,
+	# and a live one only after it exits.
+	screen.request_shutdown()
+	_report.check("keyboard focus was cleared",
+			fake.focus_calls.back() == false, str(fake.focus_calls))
+	_report.check("activated was cleared",
+			fake.activated_calls.back() == false, str(fake.activated_calls))
+	screen._unhandled_key_input(_key(KEY_F, true))
+	_report.check("no physical key was forwarded",
+			fake.physical.size() == physical_before)
 
 
 func _key(keycode: Key, pressed: bool) -> InputEventKey:
