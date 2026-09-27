@@ -148,34 +148,33 @@ this path; drive scale with `weston-terminal` (`WRL_COMPOSITOR_CLIENT`) instead.
 ## In the launcher
 
 `project/compositor/compositor_screen.tscn` is the reusable half: a
-`MeshInstance3D` carrying `compositor_poc.gd` and a 0.6 m quad, instanced twice.
+`MeshInstance3D` carrying `compositor_poc.gd` and a 0.6 m quad. It runs in two
+places:
 
-| Scene | Node | At |
-|---|---|---|
-| `project/main/root.tscn` | `WindowManager/CompositorScreen` | `(0, 2.5, -2.0)`, 2× scale |
-| `project/compositor/compositor_poc.tscn` | `Screen` | `(0, 1.2, -1)` |
+| Where | How |
+|---|---|
+| The launcher | `WindowManager` opens it in the LEFT slot through `create_compositor_window()`, hosted by an `SWindow` |
+| `project/compositor/compositor_poc.tscn` | Free-standing `Screen` at `(0, 1.2, -1)`, the local Linux harness |
 
-A fixed quad and nothing more, deliberately not an `SWindow`: no input, focus,
-resizing, z-ordering or second surface. Its `mesh` is `resource_local_to_scene`,
-so the runtime re-aspect in one instance cannot resize the other's.
-
-The launcher origin and node scale are a live visual-tuning knob (legibility of
-the terminal at distance), not a fixed contract — only the origin is pinned by
-`tests/compositor_scene_check.gd`, and the basis scale is deliberately left free.
-`_apply_aspect` widens the quad with the surface, so a wide client can reach past
-the authored bounds; size and place it against the startup windows accordingly.
+Hosted, the window replaces its Content viewport with the screen and keeps the
+layout default size for its lifetime: the quad is fixed at that size, the client
+is asked for it in its first configure (at the window's pixel density), and the
+window has no resize handles. A client that picks another size is stretched to
+the quad. Window focus, suspension and the solo tween's interaction lock gate
+the screen's pointer and keyboard input. Free-standing, the quad follows the
+surface's aspect and a mapped surface takes focus by itself. Its `mesh` is
+`resource_local_to_scene` either way, so one instance cannot resize another's.
 
 Two independent rules keep it invisible where it cannot work: `visible = false`
 is serialized into the scene rather than applied in `_ready`, and `visible`
 becomes true only once `get_texture()` has returned a texture *and* it has been
 bound. `ClassDB.class_exists("WaylandCompositor")` is the only gate — where the
 class is absent `_ready` prints one line and returns, having already called
-`set_process(false)`. That is an expected host, not a misconfigured one.
+`set_process(false)`, and the launcher opens a placeholder window in LEFT
+instead. That is an expected host, not a misconfigured one.
 
-To back the integration out, delete the `CompositorScreen` node block and its
-`ext_resource` from `root.tscn` and decrement `load_steps`; the scene, script,
-harness wrapper and tests all stay. There is no environment variable for this —
-a flag would be read long after Godot has loaded the GDExtension at import.
+Every screen joins the `wayland_surfaces` group; `root.gd` shuts each one down
+before quitting, and closing a compositor window waits for its client to exit.
 
 ## Testing
 

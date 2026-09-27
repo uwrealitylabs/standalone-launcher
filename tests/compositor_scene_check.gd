@@ -8,10 +8,11 @@ extends SceneTree
 ## still load and the script must still parse, or the whole project stops
 ## opening in the editor for everyone who is not on the target.
 ##
-## Three scenes are covered, because the screen is now used twice:
+## Three scenes are covered:
 ##   compositor_screen.tscn  the reusable quad, script and all
 ##   compositor_poc.tscn     the local Linux harness wrapper
-##   root.tscn               the launcher, which instances the screen
+##   root.tscn               the launcher, which must not author a screen of its
+##                           own: WindowManager hosts one in an SWindow at runtime
 ##
 ## Instantiates without adding to a tree, so _ready never runs and the values
 ## checked come from the scene files rather than from runtime. That is what
@@ -42,14 +43,6 @@ const AUTHORED_QUAD_SIZE := Vector2(0.6, 0.6)
 # eye height, so tests/linux/ camera setups frame it without being told to.
 const HARNESS_ORIGIN := Vector3(0.0, 1.2, -1.0)
 
-# Where root.tscn puts it: centred in front of the player at eye height, scaled
-# up so the terminal stays legible at this depth. Only the origin is asserted;
-# the basis scale is a live visual-tuning knob and deliberately not pinned.
-const LAUNCHER_ORIGIN := Vector3(0.0, 2.5, -2.0)
-
-# Node path get_state() reports for the launcher's instance, minus the leading
-# "./" that SceneState prefixes onto every path.
-const LAUNCHER_NODE_PATH := "WindowManager/CompositorScreen"
 
 
 func _init() -> void:
@@ -140,31 +133,16 @@ func _check_launcher_integration(report: Report) -> void:
 	if scene == null:
 		return
 
+	# A free-standing screen beside the hosted one would start a second server
+	# and client, and sit outside the window layout.
 	var state := scene.get_state()
-	var index := -1
+	var authored: Array[String] = []
 	for i in state.get_node_count():
-		if str(state.get_node_path(i)).trim_prefix("./") == LAUNCHER_NODE_PATH:
-			index = i
-	report.check("CompositorScreen is a child of WindowManager", index != -1,
-			"no node at %s" % LAUNCHER_NODE_PATH)
-	if index == -1:
-		return
-
-	# get_node_type() is empty for an instanced node; the PackedScene it points
-	# at is what identifies it.
-	var instance := state.get_node_instance(index)
-	report.check("it instances a scene", instance != null)
-	report.check("it instances compositor_screen.tscn",
-			instance != null and instance.resource_path == SCREEN_SCENE,
-			"" if instance == null else instance.resource_path)
-
-	var placed := Vector3.ZERO
-	for p in state.get_node_property_count(index):
-		if state.get_node_property_name(index, p) == "transform":
-			placed = (state.get_node_property_value(index, p) as Transform3D).origin
-	report.near("placed x", placed.x, LAUNCHER_ORIGIN.x)
-	report.near("placed y", placed.y, LAUNCHER_ORIGIN.y)
-	report.near("placed z", placed.z, LAUNCHER_ORIGIN.z)
+		var instance := state.get_node_instance(i)
+		if instance != null and instance.resource_path == SCREEN_SCENE:
+			authored.append(str(state.get_node_path(i)))
+	report.check("root.tscn instances no compositor screen", authored.is_empty(),
+			", ".join(authored))
 
 
 func _check_descriptor(report: Report) -> void:

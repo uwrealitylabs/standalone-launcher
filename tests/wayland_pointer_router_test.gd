@@ -47,6 +47,7 @@ func _initialize() -> void:
 	_check_owner_exit_hands_off()
 	_check_overlapping_pinches()
 	_check_reset_and_strays()
+	_check_cancel()
 	_report.finish(self)
 
 
@@ -315,3 +316,36 @@ func _check_reset_and_strays() -> void:
 	router.handle(_b, T.PRESSED, Vector2(0.5, 0.5))
 	_report.check("with no sink, events are tracked but not sent",
 			sink.calls == ["enter (0.4, 0.4)"], str(sink.calls))
+
+
+func _check_cancel() -> void:
+	_report.section("cancel")
+	var r: Array = _router()
+	var router: WaylandPointerRouter = r[0]
+	var sink: Sink = r[1]
+	router.cancel()
+	_report.check("with nothing on the surface, cancel sends nothing",
+			sink.calls.is_empty(), str(sink.calls))
+
+	router.handle(_a, T.ENTERED, Vector2(0.2, 0.2))
+	router.handle(_b, T.ENTERED, Vector2(0.8, 0.8))
+	sink.calls.clear()
+	router.cancel()
+	_report.check("a hovering pointer leaves", sink.calls == ["leave"], str(sink.calls))
+
+	router.handle(_a, T.ENTERED, Vector2(0.2, 0.2))
+	router.handle(_a, T.PRESSED, Vector2(0.2, 0.2))
+	sink.calls.clear()
+	router.cancel()
+	_report.check("a press is released before the pointer leaves",
+			sink.calls == ["button 1 up", "leave"], str(sink.calls))
+	_report.check("cancel clears the owner", router.get_pointer_owner() == null)
+	router.handle(_a, T.MOVED, Vector2(0.3, 0.2))
+	router.handle(_a, T.RELEASED, Vector2(0.3, 0.2))
+	router.handle(_b, T.MOVED, Vector2(0.7, 0.7))
+	router.handle(_b, T.EXITED, Vector2(0.7, 0.7))
+	_report.check("the hands' later events send nothing until they enter again",
+			sink.calls == ["button 1 up", "leave"], str(sink.calls))
+	router.handle(_b, T.ENTERED, Vector2(0.6, 0.6))
+	_report.check("a fresh enter after cancel enters again",
+			sink.calls.back() == "enter (0.6, 0.6)", str(sink.calls))

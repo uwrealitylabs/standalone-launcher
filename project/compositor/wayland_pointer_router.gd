@@ -79,6 +79,17 @@ func handle(pointer: Object, type: int, uv: Vector2) -> void:
 				_move_to(_hovering[_owner])
 
 
+## Ends any press and takes the pointer off the surface, then forgets every hand,
+## for when the surface stops taking pointer input while it stays mapped. A hand
+## counts again only from its next ENTERED.
+func cancel() -> void:
+	if _owner_pressed:
+		_release_button()
+	if _entered:
+		_send("pointer_leave", [])
+	reset()
+
+
 ## Forgets every hand without sending anything, for when the surface goes away
 ## and the bridge has already cleared its own pointer focus.
 func reset() -> void:

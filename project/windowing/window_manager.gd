@@ -95,12 +95,22 @@ func create_window(content: PackedScene = null) -> SWindow:
 	return _create_window_now(content)
 
 
+## Opens a window presenting a Wayland client at the layout default size, which it
+## keeps; see [method SWindow.host_compositor_surface] for `screen`. Docked-path,
+## like [method create_window]. Returns null as that does.
+func create_compositor_window(screen: MeshInstance3D = null) -> SWindow:
+	return _create_window_now(null, func(win: SWindow) -> void:
+			win.host_compositor_surface(screen))
+
+
 ## Synchronous commit that opens a window showing `content` in the first empty slot
-## (CENTRE, then RIGHT, then LEFT), sizes it to the layout default, and focuses it.
+## (CENTRE, then RIGHT, then LEFT), sizes it to the layout default, runs `setup`
+## on it when given, and focuses it.
 ## Self-enforces the state gate — warns and returns null unless DOCKED — so no
 ## caller can create a window mid-transition or behind a solo. Returns null and
 ## warns without mutating state when all three slots are occupied.
-func _create_window_now(content: PackedScene = null) -> SWindow:
+func _create_window_now(content: PackedScene = null,
+		setup: Callable = Callable()) -> SWindow:
 	if _solo_state != Presentation.DOCKED:
 		push_warning("Window creation is only allowed in the docked layout; ignoring.")
 		return null
@@ -127,6 +137,8 @@ func _create_window_now(content: PackedScene = null) -> SWindow:
 	if content:
 		win.set_content(content)
 	win._commit_requested_size(default_size())
+	if setup.is_valid():
+		setup.call(win)
 	focus(win)
 
 	return win
@@ -450,8 +462,9 @@ func _update_focus_visuals() -> void:
 # EXITING reject all optional layout-mutating operations.
 
 ## Enters solo mode on `win`: focuses it, suspends every other open window, and
-## animates it to the CENTRE slot at default_solo_size. Rejected unless currently
-## DOCKED and `win` is open and slotted. Emits solo_entered on completion.
+## animates it to the CENTRE slot at default_solo_size, or at its own size when it
+## has a fixed one. Rejected unless currently DOCKED and `win` is open and slotted.
+## Emits solo_entered on completion.
 func enter_solo(win: SWindow) -> void:
 	if _solo_state != Presentation.DOCKED:
 		return
@@ -470,9 +483,10 @@ func enter_solo(win: SWindow) -> void:
 			other.set_suspended(true)
 
 	win.set_transitioning(true)
+	var solo_size := win.content_size if win.has_fixed_size() \
+			else clamp_solo_size(win, default_solo_size)
 	_start_transition(win, win.transform, slot_transform(Slot.CENTRE),
-			win.content_size, clamp_solo_size(win, default_solo_size),
-			Presentation.ENTERING)
+			win.content_size, solo_size, Presentation.ENTERING)
 
 
 ## Exits solo mode, animating the soloed window back to its slot and content_size
@@ -664,9 +678,13 @@ func _ready() -> void:
 	create_window(load("res://project/launch_service/application_menu.tscn"))
 	create_window(load("res://project/shell/terminal_ui.tscn"))
 
-	# TEMP: a third placeholder window in LEFT for eyeballing a full three-slot
-	# layout. Skipped headless so the suites keep their two-window startup.
+	# TEMP: a third window in LEFT, skipped headless so the suites keep their
+	# two-window startup: a Wayland client where the compositor extension is
+	# built, otherwise a placeholder for eyeballing a full three-slot layout.
 	if DisplayServer.get_name() != "headless":
-		create_window(load("res://project/windowing/window_placeholder_content.tscn"))
+		if ClassDB.class_exists("WaylandCompositor"):
+			create_compositor_window()
+		else:
+			create_window(load("res://project/windowing/window_placeholder_content.tscn"))
 
 	create_keyboard()
