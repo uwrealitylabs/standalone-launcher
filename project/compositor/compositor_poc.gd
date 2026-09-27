@@ -8,9 +8,10 @@ extends MeshInstance3D
 ##
 ## Deliberately not an [SWindow]: that class drives an [XRToolsViewport2DIn3D]
 ## and a [SubViewport], neither of which a compositor-owned texture fits.
-## Resizing, pointer input and multi-window support are all out of scope; the
-## single surface takes keyboard focus while it is mapped and routes key events
-## to it (see [method attach_virtual_keyboard] and [method _unhandled_key_input]).
+## Resizing and multi-window support are out of scope. The single surface takes
+## keyboard focus while it is mapped and routes key events to it (see
+## [method attach_virtual_keyboard] and [method _unhandled_key_input]); hand
+## pointers on its collider reach it through a [WaylandPointerRouter].
 ##
 ## Authored hidden, showing itself only once a real client frame is bound, so a
 ## host with no GDExtension (every macOS and x86_64 machine) renders nothing rather
@@ -35,6 +36,10 @@ const QUAD_HEIGHT := 0.6
 ## can `await` it to sequence its own quit. See [method request_shutdown].
 signal shutdown_finished
 
+## Raised by [HandPointer] on the quad's collider, which carries no signal of its
+## own; see [method _on_pointer_event].
+signal pointer_event(event: XRToolsPointerEvent)
+
 ## Whether to bring the server and client up automatically on entering the tree.
 ## Left on for the standalone scene; a host that starts the surface on its own
 ## terms — or a test driving the node with its own compositor — turns it off, and
@@ -46,6 +51,7 @@ var _client_pid: int = -1
 var _terminating_since: float = -1.0
 var _material: StandardMaterial3D = null
 var _client_command: String = DEFAULT_CLIENT_COMMAND
+var _pointer_router := WaylandPointerRouter.new()
 
 ## Whether the surface currently holds keyboard focus. Tracks the mapped state:
 ## set when a surface maps, cleared on unmap or client-gone. Gates key routing so
@@ -69,6 +75,7 @@ func _ready() -> void:
 	# no visible quad and no per-frame callback.
 	visible = false
 	set_process(false)
+	pointer_event.connect(_on_pointer_event)
 
 	var override := OS.get_environment("WRL_COMPOSITOR_CLIENT")
 	if override != "":
@@ -241,6 +248,15 @@ func _exit_tree() -> void:
 		_compositor = null
 
 
+## Keeps the collider pointable only while the quad shows, so a hidden surface
+## never swallows the ray meant for what sits behind it.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED:
+		var shape := get_node_or_null("StaticBody3D/CollisionShape3D") as CollisionShape3D
+		if shape:
+			shape.set_deferred("disabled", not is_visible_in_tree())
+
+
 func _on_surface_mapped(size: Vector2i) -> void:
 	# No texture exists yet — binding the material here would bind null.
 	print("[compositor_poc] surface mapped at %dx%d" % [size.x, size.y])
@@ -258,6 +274,7 @@ func _on_surface_resized(size: Vector2i) -> void:
 func _on_surface_unmapped() -> void:
 	visible = false
 	_set_focus(false)
+	_pointer_router.reset()
 
 
 func _on_frame_available() -> void:
@@ -271,7 +288,28 @@ func _on_frame_available() -> void:
 func _on_client_gone() -> void:
 	visible = false
 	_set_focus(false)
+	_pointer_router.reset()
 	print("[compositor_poc] client surface went away")
+
+
+## --- pointer routing (Milestone 3) ---------------------------------------
+
+
+## Converts a hand's event on the collider to surface UV and routes it. Every
+## event feeds the router, mapped or not, so ownership never drifts from the
+## hands' real state; the compositor ignores input until a surface maps.
+func _on_pointer_event(event: XRToolsPointerEvent) -> void:
+	# Follow whichever compositor is current, including none after teardown.
+	_pointer_router.sink = _compositor
+	_pointer_router.handle(event.pointer, event.event_type, _world_to_uv(event.position))
+
+
+## Surface UV of a world point on the quad: (0, 0) top-left, (1, 1) bottom-right.
+## Not clamped, since a pressed drag reports points past the edge.
+func _world_to_uv(world: Vector3) -> Vector2:
+	var quad := mesh as QuadMesh
+	var local := global_transform.affine_inverse() * world
+	return Vector2(local.x / quad.size.x + 0.5, 0.5 - local.y / quad.size.y)
 
 
 ## --- keyboard routing (Milestone 4) --------------------------------------
@@ -349,3 +387,9 @@ func _apply_aspect(size: Vector2i) -> void:
 		return
 	var aspect := float(size.x) / float(size.y)
 	quad.size = Vector2(QUAD_HEIGHT * aspect, QUAD_HEIGHT)
+	# The collider tracks the quad; its box hangs behind so the front face lies on
+	# the quad's plane, where HandPointer resolves a press.
+	var shape := get_node_or_null("StaticBody3D/CollisionShape3D") as CollisionShape3D
+	if shape and shape.shape is BoxShape3D:
+		var box := shape.shape as BoxShape3D
+		box.size = Vector3(quad.size.x, quad.size.y, box.size.z)

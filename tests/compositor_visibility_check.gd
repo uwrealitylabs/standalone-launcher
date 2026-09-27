@@ -65,10 +65,11 @@ func _initialize() -> void:
 
 	report.section("after _ready, with no extension on this host")
 	report.check("still hidden", not screen.visible)
-	# An empty child list is the assertion: ClassDB.instantiate was never
+	# Only the authored collider is a child: ClassDB.instantiate was never
 	# reached, so nothing was added and no server was started.
-	report.check("no compositor child was created", screen.get_child_count() == 0,
-			"%d child(ren)" % screen.get_child_count())
+	var children := screen.get_children().map(func(c: Node) -> String: return c.name)
+	report.check("no compositor child was created",
+			children == ["StaticBody3D"] and screen._compositor == null, str(children))
 	# Godot enables processing on tree entry for any script defining _process.
 	# _ready turns it off again, and only a live client pid turns it back on.
 	report.check("wrapper is not processing", not screen.is_processing())
