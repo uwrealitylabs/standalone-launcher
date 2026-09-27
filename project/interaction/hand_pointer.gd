@@ -97,20 +97,19 @@ func _process(delta: float):
 
 	_debounce_timer = max(0.0, _debounce_timer - delta)
 
-	# get pinch/trigger value from the XR controller
-	var pinch_value: float = 0.0
-	var controller = _get_controller()
-	if controller:
-		pinch_value = controller.get_float("trigger")
-
-	# process what the ray is hitting
+	# Hover runs before the pinch, so a press frame delivers any hover MOVED first
+	# and PRESSED lands where the pointer last was.
 	_process_hit_test()
-
-	# process pinch activation
-	_process_tap(pinch_value)
+	_process_tap(_pinch_value())
 
 	# update visuals
 	_update_visuals()
+
+
+## Pinch strength this frame, from the XR controller's trigger; 0 with none.
+func _pinch_value() -> float:
+	var controller = _get_controller()
+	return controller.get_float("trigger") if controller else 0.0
 
 
 func _process_hit_test():
@@ -178,6 +177,9 @@ func _process_tap(pinch_value: float):
 		var pos: Vector3 = hit if hit != null else _last_gesture_hit
 		_send_xr_event(XRToolsPointerEvent.Type.RELEASED, _locked_target, pos)
 		_locked_target = null
+		# Resume hover from where the gesture ended, so the next hover MOVED or
+		# EXITED does not carry the stale point from before the press.
+		_last_hover_pos = pos
 
 	_was_pinching = is_pinching
 
