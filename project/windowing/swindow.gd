@@ -177,8 +177,9 @@ func send_input(event: InputEvent):
 
 ## Presents a Wayland client in place of the Content viewport, at the current
 ## content size for the window's lifetime: the resize handles are removed and
-## every later size request keeps that size. Call once, before the window is first
-## focused. `screen` is a compositor_screen.tscn instance not yet in the tree; null
+## every later size request keeps that size. Without OpenXR, as with viewport content,
+## the surface takes keys only through [method send_input], not from the physical
+## keyboard. Call once, before the window is first focused. `screen` is a compositor_screen.tscn instance not yet in the tree; null
 ## instantiates one, which starts its server and client on entering the tree.
 func host_compositor_surface(screen: MeshInstance3D = null) -> void:
 	if _surface:
@@ -205,6 +206,15 @@ func host_compositor_surface(screen: MeshInstance3D = null) -> void:
 	_surface_root.visible = not is_suspended
 	add_child(_surface_root)
 	_surface_root.add_child(_surface)
+	if not XRUtils.is_openxr_active():
+		# As for the Content viewport in _ready: off-headset, keys come only from
+		# the virtual keyboard through send_input. READY turns processing on for
+		# an overridden callback, so switch it off after that.
+		if _surface.is_node_ready():
+			_surface.set_process_unhandled_key_input(false)
+		else:
+			_surface.ready.connect(
+					_surface.set_process_unhandled_key_input.bind(false), CONNECT_ONE_SHOT)
 
 
 ## Whether this window keeps a fixed size, ignoring resize requests.

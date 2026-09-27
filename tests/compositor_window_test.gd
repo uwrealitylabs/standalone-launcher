@@ -5,6 +5,7 @@ extends SceneTree
 ##   - the window opens at the layout default size with the screen in place of its
 ##     Content viewport, the client asked for that size, and no resize handles;
 ##   - programmatic resize requests leave the size alone;
+##   - off-headset, only virtual-keyboard keys reach the surface, not physical ones;
 ##   - keys and pointer reach the surface only while the window is focused, and a
 ##     press on the surface focuses the window;
 ##   - the solo tween's interaction lock cuts keys and pointer, ending a press;
@@ -91,6 +92,7 @@ func _initialize() -> void:
 	await physics_frame
 
 	_check_opened(wm, win, screen, fake)
+	_check_physical_keys_off_headset(wm, screen, fake)
 	_check_resize_ignored(wm, win, screen)
 	await _check_focus_gate(wm, win, screen, fake)
 	await _check_interaction_lock(win, screen, fake)
@@ -123,6 +125,29 @@ func _check_opened(wm: WindowManager, win: SWindow, screen: MeshInstance3D,
 			and Fixtures.handle(win, "BR") == null)
 	_report.check("the mapped surface takes focus as the focused window",
 			fake.take() == ["focus true", "activated true"])
+
+
+## Runs without OpenXR, so the window takes keys only from the virtual keyboard.
+## The later sections call _unhandled_key_input directly to cover the focus gate
+## that a headset run keeps.
+func _check_physical_keys_off_headset(wm: WindowManager, screen: MeshInstance3D,
+		fake: FakeCompositor) -> void:
+	_report.section("physical keyboard off-headset")
+	_report.check("OpenXR is not active in this run", not XRUtils.is_openxr_active())
+	_report.check("the screen does not process physical keys",
+			not screen.is_processing_unhandled_key_input())
+	root.push_input(_key())
+	_report.check("a physical key through the viewport does not reach the surface",
+			fake.take().is_empty())
+	wm._on_key_pressed(_key())
+	_report.check("a virtual-keyboard key does", fake.take() == ["virtual"])
+	# Control: the same push does arrive once processing is on, so the empty
+	# result above is the gate, not a push that never dispatched.
+	screen.set_process_unhandled_key_input(true)
+	root.push_input(_key())
+	_report.check("control: with processing on, the push reaches the surface",
+			fake.take() == ["physical"])
+	screen.set_process_unhandled_key_input(false)
 
 
 func _check_resize_ignored(wm: WindowManager, win: SWindow, screen: MeshInstance3D) -> void:
