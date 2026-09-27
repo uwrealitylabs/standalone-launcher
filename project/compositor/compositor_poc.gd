@@ -435,10 +435,9 @@ func route_virtual_key(event: InputEventKey) -> void:
 	_compositor.send_virtual_key(event)
 
 
-## Brings keyboard focus and the xdg_toplevel activated state in line with the
-## mapped state, a requested shutdown and the host's gates, sending only what
-## changed. Clearing on unmap/gone mirrors the bridge's own defensive clear and,
-## more importantly, stops key routing once there is no live surface.
+## Syncs keyboard focus and the xdg_toplevel activated state with the mapped
+## state, a requested shutdown and the host's gates, sending only what changed.
+## Without a live surface both are cleared, which also stops key routing.
 func _sync_focus() -> void:
 	if _compositor == null:
 		return

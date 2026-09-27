@@ -172,6 +172,7 @@ const char *wlb_runtime_dir(const wlb_server *server)
 }
 
 
+/* Queues an event for wlb_next_event, evicting the oldest when the ring is full. */
 static void push_event(wlb_server *server, wlb_event_type type,
 		uint32_t width, uint32_t height)
 {
@@ -207,6 +208,7 @@ int wlb_next_event(wlb_server *server, wlb_event *out)
 }
 
 
+/* Ends any open read access to the held buffer, then unlocks and forgets it. */
 static void drop_pending(wlb_server *server)
 {
 	if (server->pending == NULL) {
@@ -250,6 +252,10 @@ static void send_output_enter(wlb_server *server, struct wlr_surface *surface);
 static void clear_keyboard_focus(wlb_server *server);
 
 
+/*
+ * Tracks the mapped surface's logical size, reporting changes as RESIZED, and
+ * locks each newly committed buffer as the frame wlb_frame_acquire hands out.
+ */
 static void handle_surface_commit(struct wl_listener *listener, void *data)
 {
 	wlb_server *server = wl_container_of(listener, server, surface_commit);
@@ -327,6 +333,7 @@ static void handle_surface_unmap(struct wl_listener *listener, void *data)
 }
 
 
+/* Unhooks every per-client listener. A no-op once they are already unhooked. */
 static void detach_surface(wlb_server *server)
 {
 	if (!server->listeners_armed) {
@@ -420,6 +427,10 @@ static void handle_xdg_surface_commit(struct wl_listener *listener, void *data)
 }
 
 
+/*
+ * Adopts the first toplevel and arms its listeners; any toplevel arriving while
+ * one is held is asked to close.
+ */
 static void handle_new_toplevel(struct wl_listener *listener, void *data)
 {
 	wlb_server *server = wl_container_of(listener, server, new_toplevel);
@@ -580,6 +591,7 @@ static uint32_t now_msec(void)
 }
 
 
+/* The modifier and layout mask the bridge's xkb state currently implies. */
 static struct wlr_keyboard_modifiers current_mods(wlb_server *server)
 {
 	struct wlr_keyboard_modifiers mods = {
@@ -1084,11 +1096,8 @@ void wlb_toplevel_set_activated(wlb_server *server, int activated)
 	if (server == NULL || server->toplevel == NULL) {
 		return;
 	}
-	/*
-	 * wlroots asserts on a configure before the initial commit or after a
-	 * null-buffer unmap resets the surface. Nothing is lost: the host resends
-	 * activated once the surface maps again.
-	 */
+	/* wlroots asserts on configuring an uninitialized surface (before the
+	 * initial commit, or after a null-buffer unmap); the host resends on map. */
 	if (!server->toplevel->base->initialized) {
 		return;
 	}

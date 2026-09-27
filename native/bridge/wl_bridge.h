@@ -42,7 +42,8 @@ typedef struct {
 
 
 /*
- * A read window onto a locked buffer. Valid only between a successful
+ * A read window onto a locked buffer, sized in buffer pixels (the logical size
+ * times the client's buffer scale). Valid only between a successful
  * wlb_frame_acquire() and the matching wlb_frame_release(); `data` dangles
  * after release.
  */
@@ -90,7 +91,10 @@ int wlb_next_event(wlb_server *server, wlb_event *out);
 /* Whether the selected toplevel is currently mapped. */
 int wlb_is_mapped(const wlb_server *server);
 
-/* Last known surface size in pixels; zero when nothing is mapped. */
+/*
+ * Last known logical surface size -- the buffer size divided by the client's
+ * buffer scale; zero when nothing is mapped.
+ */
 void wlb_surface_size(const wlb_server *server, uint32_t *width, uint32_t *height);
 
 /*
@@ -116,11 +120,12 @@ void wlb_frame_release(wlb_server *server, int accepted);
  * --- input (wl_seat: pointer + keyboard) --------------------------------
  *
  * The caller passes plain data and never touches wlroots types. Pointer
- * coordinates are surface-local pixels. Keycodes are Linux evdev codes; the
- * bridge owns the xkb state and derives modifiers from it (xkb keycode =
- * evdev + 8), so the caller sends only real press/release edges -- never
- * synthetic repeats, which the client generates itself from the advertised
- * repeat_info. Every call must come from the bridge's single thread.
+ * coordinates are surface-local, in logical units (see wlb_surface_size).
+ * Keycodes are Linux evdev codes; the bridge owns the xkb state and derives
+ * modifiers from it (xkb keycode = evdev + 8), so the caller sends only real
+ * press/release edges -- never synthetic repeats, which the client generates
+ * itself from the advertised repeat_info. Every call must come from the
+ * bridge's single thread.
  *
  * Each pointer call is one complete logical batch: after its events the bridge
  * emits exactly one pointer frame, so the caller never sends a frame. A button
@@ -132,8 +137,11 @@ void wlb_pointer_motion(wlb_server *server, double sx, double sy);
 void wlb_pointer_leave(wlb_server *server);
 void wlb_pointer_button(wlb_server *server, uint32_t button, int pressed);
 
-/* Keyboard focus gates key delivery and drives the wl_keyboard enter/leave the
- * client needs before it will accept keys. */
+/*
+ * Keyboard focus gates key delivery and drives the wl_keyboard enter/leave the
+ * client needs before it will accept keys. Losing focus releases every held key,
+ * so no modifier sticks; a release for a key not held is ignored.
+ */
 void wlb_keyboard_key(wlb_server *server, uint32_t keycode, int pressed);
 void wlb_keyboard_focus(wlb_server *server, int focused);
 
@@ -141,7 +149,7 @@ void wlb_keyboard_focus(wlb_server *server, int focused);
 void wlb_toplevel_set_activated(wlb_server *server, int activated);
 
 /*
- * Size, in pixels, the bridge configures the toplevel with on its initial
+ * Logical size the bridge configures the toplevel with on its initial
  * commit -- set it before the client maps so the first buffer arrives at the
  * slot size. 0x0 (the default) lets the client keep the size it chooses.
  */
