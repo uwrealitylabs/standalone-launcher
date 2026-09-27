@@ -1,24 +1,9 @@
 extends MeshInstance3D
 
-## Proof of concept: shows one Wayland client on a fixed quad.
-##
-## Owns the client process outright — creation, liveness, and teardown — while
-## [WaylandCompositor] owns polling and the texture. Splitting process ownership
-## across the GDScript/C++ boundary is how children get double-reaped or leaked.
-##
-## Runs standalone, or hosted by an [SWindow] in place of its Content viewport
-## (see [method SWindow.host_compositor_surface]). A host sets [member
-## fixed_quad_size] and [member initial_size] before the node enters the tree, then
-## gates input with [method set_host_focused], [method set_keys_routed] and
-## [method set_pointer_enabled]; standalone, all three stay on. Resizing and
-## multi-window support are out of scope. A mapped surface takes keyboard focus
-## while the host allows it and receives key events (see
-## [method attach_virtual_keyboard] and [method _unhandled_key_input]); hand
-## pointers on its collider reach it through a [WaylandPointerRouter].
-##
-## Authored hidden, showing itself only once a real client frame is bound, so a
-## host with no GDExtension (every macOS and x86_64 machine) renders nothing rather
-## than an untextured white quad.
+## Shows one Wayland client on a fixed-size quad, hidden until a real frame binds, so
+## a host without the GDExtension shows nothing. It alone owns the client process, so
+## no child leaks or is reaped twice. A host [SWindow] sets the sizes before tree entry
+## and gates input via set_host_focused, set_keys_routed and set_pointer_enabled.
 
 ## Default client. Overridable via WRL_COMPOSITOR_CLIENT
 const DEFAULT_CLIENT_COMMAND := "weston-simple-shm"
@@ -367,7 +352,7 @@ func _on_client_gone() -> void:
 	print("[compositor_poc] client surface went away")
 
 
-## --- pointer routing (Milestone 3) ---------------------------------------
+# --- Pointer routing -------------------------------------------------------
 
 
 ## Converts a hand's event on the collider to surface UV and routes it. Every
@@ -391,12 +376,8 @@ func _world_to_uv(world: Vector3) -> Vector2:
 	return Vector2(local.x / quad.size.x + 0.5, 0.5 - local.y / quad.size.y)
 
 
-## --- keyboard routing (Milestone 4) --------------------------------------
-##
-## Key events for the focused surface come from two sources: a real USB keyboard,
-## caught here as unhandled input, and an [XRToolsVirtualKeyboard2D] connected by
-## a host through [method attach_virtual_keyboard]. Both are no-ops off Linux
-## arm64, where there is no compositor to route to.
+# --- Keyboard routing ------------------------------------------------------
+# Keys come from a USB keyboard as unhandled input and from an attached virtual one.
 
 
 ## Connects a virtual keyboard so its taps reach the focused surface. A host wires

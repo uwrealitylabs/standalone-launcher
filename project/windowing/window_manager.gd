@@ -103,12 +103,10 @@ func create_compositor_window(screen: MeshInstance3D = null) -> SWindow:
 			win.host_compositor_surface(screen))
 
 
-## Synchronous commit that opens a window showing `content` in the first empty slot
-## (CENTRE, then RIGHT, then LEFT), sizes it to the layout default, runs `setup`
-## on it when given, and focuses it.
-## Self-enforces the state gate — warns and returns null unless DOCKED — so no
-## caller can create a window mid-transition or behind a solo. Returns null and
-## warns without mutating state when all three slots are occupied.
+## Opens a window showing `content` in the first empty slot (CENTRE, RIGHT, LEFT) at
+## the default size, runs `setup` on it if given, and focuses it. Warns and returns
+## null, changing nothing, unless DOCKED or when every slot is taken, so no caller
+## opens one mid-transition or behind a solo.
 func _create_window_now(content: PackedScene = null,
 		setup: Callable = Callable()) -> SWindow:
 	if _solo_state != Presentation.DOCKED:
@@ -678,9 +676,8 @@ func _ready() -> void:
 	create_window(load("res://project/launch_service/application_menu.tscn"))
 	create_window(load("res://project/shell/terminal_ui.tscn"))
 
-	# TEMP: a third window in LEFT, skipped headless so the suites keep their
-	# two-window startup: a Wayland client where the compositor extension is
-	# built, otherwise a placeholder for eyeballing a full three-slot layout.
+	# TEMP: a third window in LEFT (skipped headless, keeping the suites' two-window
+	# startup): a Wayland client if the extension is built, else a placeholder.
 	if DisplayServer.get_name() != "headless":
 		if ClassDB.class_exists("WaylandCompositor"):
 			create_compositor_window()

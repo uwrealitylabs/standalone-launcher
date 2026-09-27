@@ -8,9 +8,8 @@ signal pointer_entered(target: Node)
 ## Emitted when the ray stops hitting a target
 signal pointer_exited(target: Node)
 
-# Colliders also receive an XRToolsPointerEvent stream, in this order: ENTERED,
-# hover MOVED, PRESSED, drag MOVED, RELEASED, EXITED. A pressed target keeps
-# receiving drag MOVED and RELEASED even after the ray leaves it.
+# Colliders also get XRToolsPointerEvents: ENTERED, hover MOVED, PRESSED, drag MOVED,
+# RELEASED, EXITED. A pressed target keeps its drag MOVED and RELEASED off the ray.
 
 ## How close thumb and index need to be to count as a tap
 @export_range(0.0, 1.0) var pinch_threshold: float = 0.8
@@ -186,13 +185,10 @@ func _process_tap(pinch_value: float):
 	_was_pinching = is_pinching
 
 
-## Intersects the pointer ray with the locked target's facing plane. Returns
-## null when there is no locked target or the ray misses the plane this frame.
-##
-## Press-through-release positions come from here, not the collision point: a
-## held press keeps its target after the ray leaves the collider, and only the
-## infinite plane still yields a coordinate there. On the collider the two agree
-## (tests/collision_zorder_parity_test.gd), so keep both sources.
+## Intersects the ray with the locked target's facing plane; null with no target or hit.
+## Presses use this, not the collision point, since only the infinite plane still yields
+## a point once the ray leaves the collider. On the collider the two agree
+## (collision_zorder_parity_test.gd), so keep both sources.
 func _locked_plane_hit() -> Variant:
 	if not is_instance_valid(_locked_target):
 		return null

@@ -1,23 +1,15 @@
 extends SceneTree
 
-## Verifies HandPointer's hover routing and pointer lifecycle, that hover reaches
-## real windows without acting on them, and that the arc's resize handles stay
-## individually pickable when every window is at its legal maximum width.
-##
-## HandPointer delivers XRToolsPointerEvent ENTERED/EXITED to the collider under
-## the ray, one pair per target change and in that order (exit the old, enter the
-## new), alongside its public hover signals. Unpressed hover MOVED follows the
-## collision point; a pinch holds the target, and drag MOVED keeps coming from its
-## facing plane after the ray leaves the collider, with no EXITED until release.
+## Verifies HandPointer's hover events and pointer lifecycle (ENTERED/EXITED per target
+## change, hover MOVED from the collision point, drag MOVED from the plane until
+## release), that hover never acts on real windows, and that every resize handle stays
+## pickable with all windows at maximum width.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/hover_affordance_test.gd
 ##
-## --xr-mode off is required: without it a modal OpenXR alert hangs the run.
-##
-## The "Viewport Texture must be set to use it" errors are expected with no
-## display server, not failures.
+## "Viewport Texture must be set to use it" errors are expected with no display server.
 
 const Report := preload("res://tests/support/report.gd")
 

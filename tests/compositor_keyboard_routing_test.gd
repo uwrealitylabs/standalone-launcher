@@ -1,24 +1,9 @@
 extends SceneTree
 
-## Verifies Milestone 4: compositor_poc.gd routes keyboard input to its surface.
-##
-## The routing is thin GDScript over the already-proven translation boundary
-## (tests/linux/translate_check.gd covers the boundary itself on arm64), so this
-## suite drives the node with a fake compositor that only records what it was
-## asked to do, and asserts the wiring:
-##
-##   - a mapped surface takes keyboard focus and the activated state, and both
-##     clear on unmap or client-gone;
-##   - real (USB) key events reach send_physical_key while focused;
-##   - virtual-keyboard taps reach send_virtual_key while focused;
-##   - nothing is forwarded once the surface is unfocused;
-##   - requesting shutdown drops focus and activation at once, before the client
-##     has exited;
-##   - attaching the same virtual keyboard twice still delivers each tap once.
-##
-## autostart is turned off so the node never brings up a real Wayland server --
-## the suite then runs identically on every host, including the arm64 VM where
-## the extension exists (compositor_visibility_check.gd has to skip there).
+## Verifies compositor_poc.gd routes USB and virtual-keyboard keys to its surface only
+## while focused, and drops focus and activation on unmap, client exit or shutdown.
+## A fake compositor records the calls and autostart is off, so no Wayland server
+## starts and the suite runs the same on every host.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \

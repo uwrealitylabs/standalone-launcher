@@ -1,20 +1,9 @@
 extends SceneTree
 
-## Verifies Milestone 5: an SWindow backed by a fixed-size compositor surface.
-##
-##   - the window opens at the layout default size with the screen in place of its
-##     Content viewport, the client asked for that size, and no resize handles;
-##   - programmatic resize requests leave the size alone;
-##   - off-headset, only virtual-keyboard keys reach the surface, not physical ones;
-##   - keys and pointer reach the surface only while the window is focused, and a
-##     press on the surface focuses the window;
-##   - the solo tween's interaction lock cuts keys and pointer, ending a press;
-##   - a suspended window's surface is hidden and takes no input;
-##   - the size stays fixed through a solo cycle;
-##   - closing waits for the screen to shut down, then frees the window.
-##
-## The screen gets a fake compositor with autostart off, as in
-## compositor_keyboard_routing_test.gd, so no Wayland server starts on any host.
+## Verifies an SWindow backed by a fixed-size compositor surface: its size, which keys
+## and pointer events reach the surface under focus, solo and suspension, and that close
+## waits for the screen to shut down. A fake compositor with autostart off stands in,
+## so no Wayland server starts on any host.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \

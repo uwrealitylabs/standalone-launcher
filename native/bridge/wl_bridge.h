@@ -1,17 +1,9 @@
 /*
- * wl_bridge -- the only place wlroots types are allowed to exist.
- *
- * Scope: one Wayland server, one xdg_toplevel, wl_shm buffers copied to
- * the caller, and a wl_seat with pointer + keyboard for driving that toplevel.
- * No resize negotiation, no popups, no subsurfaces.
- *
- * The API deliberately carries state and events rather than only frames: the
- * caller has no way to see a wlr_surface, so mapping, resizing and client exit
- * have to arrive as plain data.
- *
- * Threading: none. Every call must come from the same thread, which for the
- * launcher is Godot's main thread. wlroots documents shared-memory buffer
- * access as not thread-safe.
+ * wl_bridge -- the only place wlroots types may exist. One server, one
+ * xdg_toplevel, copied wl_shm buffers and a pointer + keyboard seat; no popups or
+ * subsurfaces. Map, resize and client exit arrive as plain-data events.
+ * Single-threaded: every call from one thread (Godot's main), as wlroots shm
+ * buffer access is not thread-safe.
  */
 #ifndef WL_BRIDGE_H
 #define WL_BRIDGE_H
@@ -117,20 +109,9 @@ int wlb_frame_acquire(wlb_server *server, wlb_frame *out);
 void wlb_frame_release(wlb_server *server, int accepted);
 
 /*
- * --- input (wl_seat: pointer + keyboard) --------------------------------
- *
- * The caller passes plain data and never touches wlroots types. Pointer
- * coordinates are surface-local, in logical units (see wlb_surface_size).
- * Keycodes are Linux evdev codes; the bridge owns the xkb state and derives
- * modifiers from it (xkb keycode = evdev + 8), so the caller sends only real
- * press/release edges -- never synthetic repeats, which the client generates
- * itself from the advertised repeat_info. Every call must come from the
- * bridge's single thread.
- *
- * Each pointer call is one complete logical batch: after its events the bridge
- * emits exactly one pointer frame, so the caller never sends a frame. A button
- * press starts wlroots' implicit grab, so motion and the release keep reaching
- * the pressed surface even when later coordinates fall outside it.
+ * Pointer input in surface-local logical units (see wlb_surface_size). Each call
+ * ends with exactly one pointer frame, so the caller never sends one. A press
+ * starts an implicit grab: motion and release reach the surface even outside it.
  */
 void wlb_pointer_enter(wlb_server *server, double sx, double sy);
 void wlb_pointer_motion(wlb_server *server, double sx, double sy);
@@ -138,9 +119,9 @@ void wlb_pointer_leave(wlb_server *server);
 void wlb_pointer_button(wlb_server *server, uint32_t button, int pressed);
 
 /*
- * Keyboard focus gates key delivery and drives the wl_keyboard enter/leave the
- * client needs before it will accept keys. Losing focus releases every held key,
- * so no modifier sticks; a release for a key not held is ignored.
+ * Keys are evdev codes, real edges only (the client makes its own repeats); the
+ * bridge derives modifiers, and a release for a key not held is ignored. Focus
+ * drives wl_keyboard enter/leave and gates delivery; losing it releases held keys.
  */
 void wlb_keyboard_key(wlb_server *server, uint32_t keycode, int pressed);
 void wlb_keyboard_focus(wlb_server *server, int focused);
@@ -156,11 +137,9 @@ void wlb_toplevel_set_activated(wlb_server *server, int activated);
 void wlb_set_initial_size(wlb_server *server, uint32_t width, uint32_t height);
 
 /*
- * Integer scale the advertised wl_output reports. A HiDPI-aware client renders
- * into a scale-times-larger buffer, so the copied frame carries more pixels than
- * the logical size -- the lever for legible text at distance. 1 (the default) is
- * the client's own resolution; values below 1 are ignored. Safe to call after
- * clients bind: the new scale is pushed to them.
+ * wl_output scale: a HiDPI client renders scale-times more pixels, for legible
+ * text at distance. Default 1; values below 1 are ignored. Safe after clients
+ * bind -- the new scale is pushed to them.
  */
 void wlb_set_output_scale(wlb_server *server, int32_t scale);
 

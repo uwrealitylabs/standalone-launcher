@@ -1,17 +1,10 @@
 extends RefCounted
 class_name WaylandPointerRouter
 
-## Reduces several hand pointers to the single pointer a Wayland seat has.
-##
-## Feed it every [XRToolsPointerEvent] a surface receives, with the event's
-## position already converted to surface UV; it drives [member sink] with
-## `pointer_enter(uv)`, `pointer_motion(uv)`, `pointer_leave()` and
-## `send_button(button, pressed)`, the [WaylandCompositor] input API.
-##
-## Ownership: the first hovering hand owns the pointer. Another hand's press
-## claims it only while the owner is not pressed; a pressed owner keeps it through
-## release. An unpressed owner that exits hands it to the next hovering hand, and
-## the pointer leaves only when no hand is hovering. Pinch is the left button.
+## Reduces hand pointers to the one pointer a Wayland seat has, driving [member sink]
+## with the [WaylandCompositor] input API. The first hovering hand owns it; another
+## hand's press takes it only from an unpressed owner, whose exit hands it to the next
+## hovering hand. It leaves when no hand hovers. Pinch is the left button.
 
 ## Receives the Wayland pointer calls. Null drops them while state still tracks.
 var sink: Object = null
@@ -106,9 +99,8 @@ func get_pointer_owner() -> Object:
 
 ## Moves the seat pointer to `uv`, which must be the owner's position.
 func _move_to(uv: Vector2) -> void:
-	# Only the implicit grab of a press may carry the pointer off the surface. A
-	# hand whose pinch was refused keeps reporting locked-plane points past the
-	# edge, and becomes the owner by handoff while still pinched.
+	# Only a press's implicit grab may leave the surface: a refused pinch still
+	# reports points past the edge, and can inherit ownership while pinched.
 	if not _owner_pressed:
 		uv = uv.clamp(Vector2.ZERO, Vector2.ONE)
 	if not _entered:

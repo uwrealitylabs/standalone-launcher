@@ -1,32 +1,16 @@
 extends SceneTree
 
-## Verifies the compositor scenes load and are authored correctly on every host,
-## including hosts with no GDExtension built.
-##
-## That last part is the point. The Wayland extension is Linux-arm64 only, so on
-## macOS and on x86_64 CI `WaylandCompositor` does not exist; the scenes must
-## still load and the script must still parse, or the whole project stops
-## opening in the editor for everyone who is not on the target.
-##
-## Three scenes are covered:
-##   compositor_screen.tscn  the reusable quad, script and all
-##   compositor_poc.tscn     the local Linux harness wrapper
-##   root.tscn               the launcher, which must not author a screen of its
-##                           own: WindowManager hosts one in an SWindow at runtime
-##
-## Instantiates without adding to a tree, so _ready never runs and the values
-## checked come from the scene files rather than from runtime. That is what
-## makes the visibility assertion meaningful: a quad hidden only by _ready would
-## still read as visible here.
-##
-## Loading root.tscn pulls in the XR Tools addon, whose scripts reference
-## autoload singletons that a --script run does not register. The resulting
-## "Identifier not found: XRToolsUserSettings" errors are expected noise and do
-## not affect the assertions below, which read the serialized scene state.
+## Verifies the compositor scenes load and are authored correctly even with no
+## GDExtension (macOS, x86_64), so the project still opens off the target. Scenes are
+## instantiated outside the tree, so _ready never runs and values come from the files;
+## root.tscn must not author a screen of its own.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \
 ##       --script res://tests/compositor_scene_check.gd
+##
+## "Identifier not found: XRToolsUserSettings" errors are expected: a --script run does
+## not register the XR Tools autoloads that root.tscn's addon scripts reference.
 
 const Report := preload("res://tests/support/report.gd")
 

@@ -68,33 +68,20 @@ struct wlb_server {
 	struct wlr_compositor *compositor;
 	struct wlr_xdg_shell *xdg_shell;
 
-	/*
-	 * One static wl_output. A HiDPI client renders at output_scale, so its
-	 * buffer -- and the texture the bridge copies -- carries that many more
-	 * pixels. Bound resources are tracked so a mapped surface can be sent
-	 * wl_surface.enter, how a toolkit learns which output (and scale) it is on.
-	 * output_scale defaults to 1; wlb_set_output_scale opts into HiDPI.
-	 */
+	/* One static wl_output; a HiDPI client renders buffers output_scale times larger. */
 	struct wl_global *output_global;
-	struct wl_list output_resources;
-	int32_t output_scale;
+	struct wl_list output_resources;  /* bound, so map can send wl_surface.enter */
+	int32_t output_scale;  /* 1 unless wlb_set_output_scale opts into HiDPI */
 
-	/*
-	 * One wl_seat with pointer + keyboard. The keyboard is a deviceless
-	 * wlr_keyboard that exists only to carry the keymap and repeat_info the
-	 * seat advertises on focus; key edges are injected through the seat, and
-	 * the bridge owns the xkb_state it derives modifiers from. last_mods is
-	 * the last modifier mask sent, so a key that changes nothing sends no
-	 * redundant wl_keyboard.modifiers. held_keys marks the evdev codes pressed
-	 * and not yet released, so a focus clear can release them from xkb_state.
-	 */
+	/* One wl_seat with pointer + keyboard. Key edges go in through the seat, and
+	 * the bridge owns the xkb_state that modifiers are derived from. */
 	struct wlr_seat *seat;
-	struct wlr_keyboard keyboard;
+	struct wlr_keyboard keyboard;  /* deviceless: carries only keymap + repeat_info */
 	struct xkb_context *xkb_ctx;
 	struct xkb_keymap *xkb_keymap;
 	struct xkb_state *xkb_state;
-	struct wlr_keyboard_modifiers last_mods;
-	unsigned char held_keys[WLB_KEYCODE_LIMIT];
+	struct wlr_keyboard_modifiers last_mods;  /* last sent; skips redundant sends */
+	unsigned char held_keys[WLB_KEYCODE_LIMIT];  /* released on focus clear */
 	int seat_ready;
 
 	/* Size the toplevel is configured with on initial commit; 0x0 = client's own. */
@@ -267,11 +254,8 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
 		return;
 	}
 
-	/*
-	 * Logical size, not buffer pixels (at scale 2 a 1612x982 buffer is an
-	 * 806x491 surface): pointer coordinates are surface-local, so input divides
-	 * by this. The frame path copies the full buffer separately.
-	 */
+	/* Logical size, not buffer pixels (scale 2: a 1612x982 buffer is 806x491), since
+	 * input divides by it. The frame path copies the full buffer separately. */
 	w = (uint32_t)(surface->current.width > 0 ?
 			surface->current.width : 0);
 	h = (uint32_t)(surface->current.height > 0 ?
@@ -409,19 +393,12 @@ static void handle_xdg_surface_commit(struct wl_listener *listener, void *data)
 	if (server->toplevel == NULL || !server->toplevel->base->initial_commit) {
 		return;
 	}
-	/*
-	 * Configure the client at its slot size before the first buffer maps.
-	 * initial_width/height default to 0x0, which lets the client keep the size
-	 * it chose -- the Compositor 0 behaviour when no size was requested.
-	 */
+	/* Configure the slot size before the first buffer maps; the default 0x0
+	 * lets the client keep the size it chose. */
 	wlr_xdg_toplevel_set_size(server->toplevel, server->initial_width,
 			server->initial_height);
-	/*
-	 * Modern (wl_compositor v6) HiDPI path, set on the initial commit so the
-	 * client's first buffer is already scaled. Legacy toolkits ignore it and use
-	 * the wl_output.enter sent on map. Runtime changes go through
-	 * wlb_set_output_scale.
-	 */
+	/* wl_compositor v6 HiDPI, set now so the first buffer is already scaled.
+	 * Legacy toolkits ignore it and use the wl_output.enter sent on map. */
 	wlr_surface_set_preferred_buffer_scale(server->surface,
 			server->output_scale);
 }
@@ -813,11 +790,8 @@ static void send_output_enter(wlb_server *server, struct wlr_surface *surface)
 
 wlb_server *wlb_create(char *socket_out, size_t socket_len)
 {
-	/*
-	 * wl_shm requires both of these unconditionally -- wlr_shm_create asserts
-	 * on a list missing either. Both are also accepted at acquire time and
-	 * rendered opaque; see wlb_frame_acquire.
-	 */
+	/* wlr_shm_create asserts unless both are listed. Both are accepted and
+	 * rendered opaque; see wlb_frame_acquire. */
 	static const uint32_t formats[] = {
 		DRM_FORMAT_ARGB8888,
 		DRM_FORMAT_XRGB8888,
@@ -867,11 +841,8 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 		goto fail;
 	}
 
-	/*
-	 * output_scale defaults to 1 (client's own resolution). The resource list
-	 * must exist before the first bind, which cannot happen until a client
-	 * connects after this returns.
-	 */
+	/* Scale 1 is the client's own resolution. The list must exist before the
+	 * first bind, which cannot happen until a client connects after this returns. */
 	wl_list_init(&server->output_resources);
 	server->output_scale = 1;
 	server->output_global = wl_global_create(server->display,
@@ -954,15 +925,8 @@ int wlb_frame_acquire(wlb_server *server, wlb_frame *out)
 		return 0;
 	}
 
-	/*
-	 * The bridge renders every surface opaque: the converter forces alpha to 0xFF
-	 * and never blends, so XRGB8888 and ARGB8888 are byte-identical for opaque
-	 * pixels (both are B,G,R,{X|A} in memory). ARGB is accepted on that basis --
-	 * Cairo clients such as weston-terminal only ever emit ARGB8888. The known
-	 * limit: a genuinely translucent client renders as opaque premultiplied, i.e.
-	 * subtly dark on its translucent pixels. The log is rate-limited because a
-	 * client on an unsupported format picks it every frame.
-	 */
+	/* Alpha is forced to 0xFF, so ARGB (Cairo, e.g. weston-terminal) renders as XRGB
+	 * and translucency comes out dark. Rate-limited: a bad format repeats per frame. */
 	if (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888) {
 		wlr_buffer_end_data_ptr_access(server->pending);
 		if (server->rejected_frames % 120 == 0) {
@@ -1008,9 +972,8 @@ void wlb_pointer_enter(wlb_server *server, double sx, double sy)
 	if (server == NULL || server->seat == NULL || server->surface == NULL) {
 		return;
 	}
-	/* wlr_seat_pointer_enter sends its own wl_pointer.frame after the enter
-	 * (types/seat/wlr_seat_pointer.c), so the bridge must not add a second one
-	 * -- unlike motion/button, whose raw sends carry no frame of their own. */
+	/* Unlike the raw motion/button sends, notify_enter already sends its own
+	 * wl_pointer.frame, so the bridge must not add a second one. */
 	wlr_seat_pointer_notify_enter(server->seat, server->surface, sx, sy);
 }
 
@@ -1062,11 +1025,8 @@ void wlb_keyboard_key(wlb_server *server, uint32_t keycode, int pressed)
 	wlr_seat_keyboard_notify_key(server->seat, now_msec(), keycode,
 			pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
 					: WL_KEYBOARD_KEY_STATE_RELEASED);
-	/*
-	 * xkb keycode = evdev + 8. Update state after the key so a modifier press
-	 * (e.g. Shift) reaches the client as its key event first, then the mask;
-	 * the dependent key arrives on a later call with the mask already applied.
-	 */
+	/* xkb keycode = evdev + 8. Updating after the key sends a modifier press
+	 * as a key event first, then the mask that later keys apply. */
 	xkb_state_update_key(server->xkb_state, keycode + 8,
 			pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
 	sync_modifiers(server);
@@ -1128,11 +1088,8 @@ void wlb_set_output_scale(wlb_server *server, int32_t scale)
 	if (server->surface != NULL) {
 		wlr_surface_set_preferred_buffer_scale(server->surface, scale);
 	}
-	/*
-	 * Push the new scale to clients that already bound the output, then a done
-	 * to apply it atomically. A client that has not bound yet reads the value
-	 * in output_bind instead.
-	 */
+	/* Push the scale plus a done (applied atomically) to bound clients; later
+	 * binds read it in output_bind. */
 	wl_resource_for_each(output, &server->output_resources) {
 		if (wl_resource_get_version(output) >= WL_OUTPUT_SCALE_SINCE_VERSION) {
 			wl_output_send_scale(output, scale);
@@ -1171,11 +1128,8 @@ void wlb_destroy(wlb_server *server)
 	if (server->display != NULL) {
 		wl_display_destroy_clients(server->display);
 	}
-	/*
-	 * Finish the keyboard and free the xkb objects before the display goes:
-	 * the wlr_seat is owned by the display and destroyed with it, and it drops
-	 * its reference to the keyboard when the keyboard is finished.
-	 */
+	/* Finish the keyboard and free xkb before the display goes: the display
+	 * destroys the seat, which must first drop its reference to the keyboard. */
 	destroy_seat(server);
 	if (server->display != NULL) {
 		wl_display_destroy(server->display);

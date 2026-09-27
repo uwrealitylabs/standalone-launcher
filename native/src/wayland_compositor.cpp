@@ -43,20 +43,15 @@ static constexpr uint32_t EVDEV_NONE = 0;
 
 
 /*
- * Maps a Godot physical key to its Linux evdev keycode. Physical, not logical:
- * the value names a position on the US layout, which is exactly what a Wayland
- * client re-interprets through its own xkb keymap. `location` disambiguates the
- * paired modifiers (left vs right Shift/Ctrl/Alt/Meta); it is ignored for keys
- * that have a single position.
- *
- * Switches on the compiler-checked Key enum so a Godot value renumbering is
- * caught at build time, and returns the frozen evdev integer. Returns
- * EVDEV_NONE for keys outside a standard 104-key keyboard plus keypad.
+ * Maps a Godot physical key (a US-layout position the client re-reads through its
+ * own keymap) to its evdev code; `location` picks left/right modifiers. Returns
+ * EVDEV_NONE outside a 104-key keyboard plus keypad.
  */
 static uint32_t physical_key_to_evdev(Key key, KeyLocation location)
 {
 	const bool right = location == KEY_LOCATION_RIGHT;
 
+	// The Key enum is compiler-checked, so a Godot renumbering fails the build.
 	switch (key) {
 	/* Letters, in evdev row order rather than alphabetical. */
 	case KEY_Q: return 16; case KEY_W: return 17; case KEY_E: return 18;
@@ -362,10 +357,8 @@ bool WaylandCompositor::ensure_image(uint32_t width, uint32_t height)
 	if (image.is_null()) {
 		return false;
 	}
-	// The surface is rendered at the output scale, so its buffer is larger than
-	// the quad's on-screen size at any working distance -- the sampler is always
-	// minifying. A mip chain is what makes that downsample clean instead of
-	// aliased; pump_frame rebuilds it per frame to match this mipmapped texture.
+	// At the output scale the buffer outsizes the quad on screen, so the sampler
+	// always minifies; mipmaps keep that clean. pump_frame rebuilds them per frame.
 	image->generate_mipmaps();
 	if (texture.is_valid()) {
 		texture->set_image(image);
@@ -568,12 +561,8 @@ void WaylandCompositor::send_physical_key(const Ref<InputEventKey> &event)
 
 void WaylandCompositor::send_virtual_key(const Ref<InputEventKey> &event)
 {
-	/*
-	 * The virtual keyboard emits a single pressed event carrying its modifier
-	 * flags, with no release to follow. Hold the modifier chord across a
-	 * press+release of the key, then let it go -- so the client sees a complete
-	 * keystroke and no latched modifier.
-	 */
+	// No release follows a virtual tap, so hold its modifiers across a key
+	// press+release, then let go: a complete keystroke, no latched modifier.
 	if (server == nullptr || event.is_null()) {
 		return;
 	}

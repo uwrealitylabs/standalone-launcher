@@ -1,21 +1,9 @@
 extends SceneTree
 
-## Verifies Milestone 3's wiring: a HandPointer aimed at compositor_screen.tscn
-## reaches the Wayland seat as surface-UV pointer calls.
-##
-## WaylandPointerRouter's arbitration has its own suite
-## (wayland_pointer_router_test.gd); this one drives a real ray and HandPointer
-## against the scene's collider and asserts the parts in between:
-##
-##   - the collider sits on the pointer layer and is pointable only while shown;
-##   - it follows the quad when a surface maps at a new aspect;
-##   - world hits convert to UV under the placement root.tscn uses, including
-##     past the edge during a pressed drag;
-##   - two hands pinching at once click once, with no stray button;
-##   - unmapping forgets the hands.
-##
-## As in compositor_keyboard_routing_test.gd, autostart is off and a fake
-## compositor records the calls, so the suite runs the same on every host.
+## Verifies a HandPointer aimed at compositor_screen.tscn reaches the seat as surface-UV
+## calls: the collider's layer and placement, UV past the edge during a press, two
+## hands clicking once. Arbitration has its own suite (wayland_pointer_router_test);
+## here too a fake compositor records the calls, with autostart off.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \

@@ -1,10 +1,8 @@
 extends SceneTree
 
-## Verifies WaylandPointerRouter: how several hand pointers become the one
-## pointer a Wayland seat has, and which seat calls each event produces.
-##
-## The router is pure logic over plain data, so a recording sink stands in for
-## WaylandCompositor and every check is an exact call sequence.
+## Verifies WaylandPointerRouter's arbitration of several hands into one seat pointer.
+## A recording sink stands in for WaylandCompositor, so each check is an exact call
+## sequence.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \
