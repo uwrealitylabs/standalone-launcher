@@ -223,7 +223,8 @@ func _check_pointer_lifecycle() -> void:
 
 
 ## Releases a press while the ray is still on the collider: hover resumes from the
-## release point, with no EXITED and no spurious MOVED.
+## release point, with no EXITED and no spurious MOVED. An untargeted release
+## leaves hover where it was.
 func _check_release_on_collider() -> void:
 	_report.section("release on the collider")
 
@@ -256,6 +257,28 @@ func _check_release_on_collider() -> void:
 	_report.check("the first hover MOVED starts from the release point",
 			resumed.last_position.is_equal_approx(Vector3(0.1, 0, -2)),
 			str(resumed.last_position))
+
+	# An untargeted pinch must not rewind hover to the grab above (ended at 0.1).
+	_aim(ray, Vector3(2, 0, 0))
+	hp._process_hit_test()
+	hp._process_tap(1.0)
+	_aim(ray, Vector3(0.2, 0, 0))
+	hp._process_hit_test()
+	_events.clear()
+	_raw.clear()
+	hp._process_tap(0.0)
+	hp._process_hit_test()
+	_report.check("an untargeted release sends nothing while the ray is still",
+			_events.is_empty(), str(_events))
+	_aim(ray, Vector3(0.25, 0, 0))
+	hp._process_hit_test()
+	_report.check("hover after an untargeted release MOVES on A",
+			_events == ["A:move"], str(_events))
+	var after_air: XRToolsPointerEvent = _raw.back() if not _raw.is_empty() else null
+	_report.check("that MOVED starts from the live hover point, not the old grab",
+			after_air != null
+			and after_air.last_position.is_equal_approx(Vector3(0.2, 0, -2)),
+			str(after_air.last_position) if after_air else "no event")
 
 	ray.get_parent().queue_free()
 	a.queue_free()

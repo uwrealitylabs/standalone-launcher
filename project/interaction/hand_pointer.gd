@@ -176,10 +176,12 @@ func _process_tap(pinch_value: float):
 		var hit = _locked_plane_hit()
 		var pos: Vector3 = hit if hit != null else _last_gesture_hit
 		_send_xr_event(XRToolsPointerEvent.Type.RELEASED, _locked_target, pos)
+		var had_target := is_instance_valid(_locked_target)
 		_locked_target = null
-		# Resume hover from where the gesture ended, so the next hover MOVED or
-		# EXITED does not carry the stale point from before the press.
-		_last_hover_pos = pos
+		# Resume hover from the release point. An untargeted pinch never froze
+		# hover, and its pos is stale, so it leaves hover alone.
+		if had_target:
+			_last_hover_pos = pos
 
 	_was_pinching = is_pinching
 
