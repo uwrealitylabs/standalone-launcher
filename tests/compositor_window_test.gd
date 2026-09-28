@@ -2,7 +2,8 @@ extends SceneTree
 
 ## Verifies an SWindow backed by a fixed-size compositor surface: its size, which keys
 ## and pointer events reach the surface under focus, solo and suspension, and that close
-## waits for the screen to shut down. A fake compositor with autostart off stands in,
+## waits for the screen to shut down, and that a client going away on its own closes the
+## window. A fake compositor with autostart off stands in,
 ## so no Wayland server starts on any host.
 ##
 ## Run with:
@@ -88,6 +89,9 @@ func _initialize() -> void:
 	await _check_suspension(wm, win, screen, fake)
 	await _check_solo_cycle(wm, win, screen)
 	await _check_close(wm, win, fake)
+	await _check_client_gone(wm)
+	await _check_client_gone_during_close(wm)
+	await _check_process_exit(wm)
 	_report.finish(self)
 
 
@@ -277,6 +281,85 @@ func _check_close(wm: WindowManager, win: SWindow, fake: FakeCompositor) -> void
 	_report.check("the screen stopped its compositor", calls.count("stop") == 1,
 			str(calls))
 	_report.check("the window was freed", not is_instance_valid(win))
+
+
+func _check_client_gone(wm: WindowManager) -> void:
+	_report.section("the client closing its toplevel closes the window")
+	var opened := _open_mapped(wm)
+	var win: SWindow = opened[0]
+	var screen: MeshInstance3D = opened[1]
+	var calls: Array[String] = (opened[2] as FakeCompositor).calls
+	screen._on_client_gone()
+	_report.check("the window stays open until the deferred close runs",
+			win in wm.open_windows)
+	await process_frame
+	_report.check("the window closed and released its slot",
+			wm.open_windows.size() == 2 and wm.slots[WindowManager.Slot.LEFT] == null)
+	await process_frame
+	await process_frame
+	_report.check("the screen stopped its compositor", calls.count("stop") == 1,
+			str(calls))
+	_report.check("the window was freed", not is_instance_valid(win))
+
+
+func _check_client_gone_during_close(wm: WindowManager) -> void:
+	_report.section("a client leaving during a requested close")
+	var opened := _open_mapped(wm)
+	var win: SWindow = opened[0]
+	var screen: MeshInstance3D = opened[1]
+	var ended := [0]
+	screen.client_ended.connect(func() -> void: ended[0] += 1)
+	win.close()
+	screen._on_client_gone()
+	await process_frame
+	await process_frame
+	_report.check("client_ended is not emitted", ended[0] == 0)
+	_report.check("the window was freed once", not is_instance_valid(win))
+
+
+## Uses a real short-lived process, so the reap path runs as it does for a client.
+func _check_process_exit(wm: WindowManager) -> void:
+	_report.section("the client process exiting")
+	var opened := _open_mapped(wm)
+	var win: SWindow = opened[0]
+	var screen: MeshInstance3D = opened[1]
+	await _run_short_client(screen)
+	_report.check("with a surface still mapped, the window stays open",
+			win in wm.open_windows)
+
+	screen._on_surface_unmapped()
+	await _run_short_client(screen)
+	await process_frame
+	_report.check("with no surface mapped, the window closes",
+			wm.open_windows.size() == 2 and wm.slots[WindowManager.Slot.LEFT] == null)
+	await process_frame
+	await process_frame
+	_report.check("the window was freed", not is_instance_valid(win))
+
+
+## Opens a compositor window whose surface is mapped and shown, on a fake compositor.
+## Returns [window, screen, fake].
+func _open_mapped(wm: WindowManager) -> Array:
+	var screen := (load(SCREEN_SCENE) as PackedScene).instantiate() as MeshInstance3D
+	screen.autostart = false
+	var win := wm.create_compositor_window(screen)
+	var fake := FakeCompositor.new()
+	screen.add_child(fake)
+	screen._compositor = fake
+	screen._on_surface_mapped(Vector2i(640, 360))
+	screen.visible = true
+	return [win, screen, fake]
+
+
+## Hands the screen a process that exits at once and waits until it is reaped.
+func _run_short_client(screen: MeshInstance3D) -> void:
+	screen._client_pid = OS.create_process("/usr/bin/true", [])
+	screen.set_process(true)
+	var frames := 0
+	# The screen may be freed mid-wait once its window closes.
+	while is_instance_valid(screen) and screen._client_pid != -1 and frames < 300:
+		await process_frame
+		frames += 1
 
 
 func _shape(screen: MeshInstance3D) -> CollisionShape3D:

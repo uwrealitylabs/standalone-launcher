@@ -176,7 +176,8 @@ func send_input(event: InputEvent):
 
 
 ## Shows a Wayland client in place of the Content viewport, fixed at the current size
-## (no resize handles). Off-headset it takes keys only through [method send_input].
+## (no resize handles), closing when the client ends. Off-headset it takes keys only
+## through [method send_input].
 ## Call once, before first focus. `screen` is an out-of-tree compositor_screen.tscn;
 ## null makes one, whose server and client start on entering the tree.
 func host_compositor_surface(screen: MeshInstance3D = null) -> void:
@@ -198,6 +199,8 @@ func host_compositor_surface(screen: MeshInstance3D = null) -> void:
 	_surface.set_keys_routed(false)
 	_surface.set_pointer_enabled(not _interaction_locked)
 	_surface.pointer_event.connect(_on_pointer_event)
+	# Deferred, so the close never runs inside the compositor's event dispatch.
+	_surface.client_ended.connect(close, CONNECT_DEFERRED)
 	_surface_root = Node3D.new()
 	_surface_root.name = "Surface"
 	_surface_root.transform = content_3d.transform

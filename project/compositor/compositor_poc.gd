@@ -27,6 +27,10 @@ const GROUP := &"wayland_surfaces"
 ## can `await` it to sequence its own quit. See [method request_shutdown].
 signal shutdown_finished
 
+## Emitted once when the client goes away on its own: its toplevel is destroyed, or
+## its process exits with no surface mapped. Never emitted for a requested shutdown.
+signal client_ended
+
 ## Raised by [HandPointer] on the quad's collider, which carries no signal of its
 ## own; see [method _on_pointer_event].
 signal pointer_event(event: XRToolsPointerEvent)
@@ -71,6 +75,9 @@ var _shutdown_requested: bool = false
 
 ## Guards [method _finish_shutdown] so [signal shutdown_finished] fires only once.
 var _shutdown_finished_sent: bool = false
+
+## Guards [method _end_client] so [signal client_ended] fires only once.
+var _client_ended_sent: bool = false
 
 
 ## Brings up the server and the client, or leaves the node dormant and hidden.
@@ -140,10 +147,12 @@ func _process(_delta: float) -> void:
 		_escalate_if_term_expired()
 		return
 	_reap_client()
-	# Only a requested teardown ends in shutdown_finished; a client that exited
-	# on its own just leaves the node dormant.
+	# Only a requested teardown ends in shutdown_finished. A mapped surface may
+	# belong to a forked child that outlives the pid, so only an unmapped one ends.
 	if _shutdown_requested:
 		_finish_shutdown()
+	elif not _mapped:
+		_end_client()
 
 
 ## Drops a compositor that failed to start. Processing is stopped before the
@@ -350,6 +359,15 @@ func _on_client_gone() -> void:
 	_mapped = false
 	_sync_focus()
 	print("[compositor_poc] client surface went away")
+	_end_client()
+
+
+## Reports a client that went away on its own; see [signal client_ended].
+func _end_client() -> void:
+	if _shutdown_requested or _client_ended_sent:
+		return
+	_client_ended_sent = true
+	client_ended.emit()
 
 
 # --- Pointer routing -------------------------------------------------------
