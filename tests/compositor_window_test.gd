@@ -2,9 +2,10 @@ extends SceneTree
 
 ## Verifies an SWindow backed by a fixed-size compositor surface: its size, which keys
 ## and pointer events reach the surface under focus, solo and suspension, and that close
-## waits for the screen to shut down, and that a client going away on its own closes the
-## window. A fake compositor with autostart off stands in,
-## so no Wayland server starts on any host.
+## waits for the screen to shut down, that the window stays hidden until the first frame
+## (or a timeout, then showing a waiting body), and that a client going away on its own
+## closes the window. A fake compositor with autostart off stands in, so no Wayland
+## server starts on any host.
 ##
 ## Run with:
 ##   godot --headless --xr-mode off --path . \
@@ -92,6 +93,10 @@ func _initialize() -> void:
 	await _check_client_gone(wm)
 	await _check_client_gone_during_close(wm)
 	await _check_process_exit(wm)
+	await _check_hidden_until_first_frame(wm)
+	await _check_reveal_timeout(wm)
+	await _check_no_reveal_while_closing(wm)
+	await _check_app_quit(wm)
 	_report.finish(self)
 
 
@@ -335,6 +340,107 @@ func _check_process_exit(wm: WindowManager) -> void:
 	await process_frame
 	await process_frame
 	_report.check("the window was freed", not is_instance_valid(win))
+
+
+func _check_hidden_until_first_frame(wm: WindowManager) -> void:
+	_report.section("hidden until the first frame")
+	var screen := (load(SCREEN_SCENE) as PackedScene).instantiate() as MeshInstance3D
+	screen.autostart = false
+	var win := wm.create_compositor_window(screen)
+	await physics_frame
+	_report.check("the window, header included, starts hidden", not win.visible)
+	_report.check("the header takes no pointer while hidden", _header_shape(win).disabled)
+	screen._on_surface_mapped(Vector2i(640, 360))
+	_report.check("mapping alone does not show it", not win.visible)
+	# Stands in for the first frame binding a texture.
+	screen.visible = true
+	_report.check("the first frame shows the window", win.visible)
+	_report.check("with no waiting body", not win.content_3d.visible)
+	await physics_frame
+	_report.check("the header takes pointer again", not _header_shape(win).disabled)
+	await _close_and_free(win)
+
+
+func _check_reveal_timeout(wm: WindowManager) -> void:
+	_report.section("a client that never draws")
+	var screen := (load(SCREEN_SCENE) as PackedScene).instantiate() as MeshInstance3D
+	screen.autostart = false
+	var win := wm.create_window()
+	win.first_frame_timeout = 0.2
+	win.host_compositor_surface(screen)
+	_report.check("the window starts hidden", not win.visible)
+	await create_timer(0.4).timeout
+	_report.check("the window shows after the timeout, so it can be closed", win.visible)
+	_report.check("the screen itself stays hidden", not screen.visible)
+	_report.check("the waiting body shows in its place", win.content_3d.is_visible_in_tree())
+	var label := win.content_3d.get_scene_instance().get_node("Label") as Label
+	_report.check("the body names the client",
+			label.text == "Waiting for %s" % screen.get_client_command().get_file(), label.text)
+
+	win.set_suspended(true)
+	_report.check("suspended: the body hides", not win.content_3d.is_visible_in_tree())
+	win.set_suspended(false)
+	_report.check("reactivated: the body shows again", win.content_3d.is_visible_in_tree())
+
+	# Stands in for a late first frame.
+	screen.visible = true
+	_report.check("a late first frame replaces the body",
+			screen.is_visible_in_tree() and not win.content_3d.visible)
+	win.set_suspended(true)
+	win.set_suspended(false)
+	_report.check("after a suspension cycle the body stays hidden",
+			not win.content_3d.visible)
+	screen.visible = false
+	_report.check("the body returns if the surface hides again", win.content_3d.visible)
+	await _close_and_free(win)
+
+
+func _check_no_reveal_while_closing(wm: WindowManager) -> void:
+	_report.section("a first frame during close")
+	var screen := (load(SCREEN_SCENE) as PackedScene).instantiate() as MeshInstance3D
+	screen.autostart = false
+	var win := wm.create_compositor_window(screen)
+	var fake := FakeCompositor.new()
+	screen.add_child(fake)
+	screen._compositor = fake
+	# Holds the close in its shutdown await, as a live client's TERM grace would.
+	screen._client_pid = OS.create_process("/bin/sleep", ["5"])
+	screen.set_process(true)
+	win.close()
+	screen.visible = true
+	_report.check("the closing window stays hidden", not win.visible)
+	OS.kill(screen._client_pid)
+	var frames := 0
+	while is_instance_valid(win) and frames < 300:
+		await process_frame
+		frames += 1
+	_report.check("the window was freed", not is_instance_valid(win))
+
+
+
+## The app quitting shuts screens down directly, bypassing [method SWindow.close].
+func _check_app_quit(wm: WindowManager) -> void:
+	_report.section("the app quitting")
+	var opened := _open_mapped(wm)
+	var win: SWindow = opened[0]
+	var screen: MeshInstance3D = opened[1]
+	screen.request_shutdown()
+	# Stands in for the client's surface going away during the shutdown.
+	screen._on_client_gone()
+	_report.check("the window hides rather than showing the waiting body",
+			not win.visible and not win.content_3d.visible)
+	await _close_and_free(win)
+
+func _close_and_free(win: SWindow) -> void:
+	win.close()
+	var frames := 0
+	while is_instance_valid(win) and frames < 30:
+		await process_frame
+		frames += 1
+
+
+func _header_shape(win: SWindow) -> CollisionShape3D:
+	return win.header_3d.get_node("StaticBody3D/CollisionShape3D") as CollisionShape3D
 
 
 ## Opens a compositor window whose surface is mapped and shown, on a fake compositor.

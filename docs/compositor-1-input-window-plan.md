@@ -263,6 +263,13 @@ compositor behaviour behind the content-surface abstraction so the `SubViewport`
 unchanged. Phase 1 is a compatibility check, not a merge or landing dependency, and
 nothing here needs a future windowing phase.
 
+**Why the `SWindow` header stays.** A client's own title bar is optional and inconsistent:
+Qt and Chromium drop it when offered server-side decorations, GTK and Firefox always draw
+one, and many draw none. Our header is the one frame every window reliably has, and it keeps
+solo, close, focus and placement in launcher code. Relying on the client's header would
+need its move/resize requests routed into `WindowManager` and a fallback frame for clients
+without one, for a duplicate header on some apps that costs little.
+
 ## 6. Board-only (deferred to the physical RB 5)
 
 End-to-end input latency in-headset, and frame pacing re-confirmed with a live interactive

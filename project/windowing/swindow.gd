@@ -17,6 +17,8 @@ signal focused(win: SWindow)
 signal solo_requested(win: SWindow)
 
 const COMPOSITOR_SCREEN := preload("res://project/compositor/compositor_screen.tscn")
+# Shown in the Content viewport while a compositor window has no client frame.
+const WAITING_CONTENT := preload("res://project/windowing/window_placeholder_content.tscn")
 
 # The manager that owns this window's placement and size policy. Null for a
 # standalone window (e.g. a headless test fixture), which falls back to the
@@ -30,6 +32,11 @@ var _surface: MeshInstance3D = null
 # visible flag, which stays hidden until a client frame arrives.
 var _surface_root: Node3D = null
 var _closing := false
+
+## Seconds a compositor window stays hidden waiting for its client's first frame
+## before it shows a waiting body, so a client that never draws can still be closed.
+## Read by [method host_compositor_surface].
+var first_frame_timeout := 2.0
 
 # True while this window is suspended behind a solo presentation (a sibling of the
 # soloed window): surfaces hidden, all collision and key routing off.
@@ -176,15 +183,17 @@ func send_input(event: InputEvent):
 
 
 ## Shows a Wayland client in place of the Content viewport, fixed at the current size
-## (no resize handles), closing when the client ends. Off-headset it takes keys only
-## through [method send_input].
+## (no resize handles). The window stays hidden until the client's first frame or
+## [member first_frame_timeout], shows a waiting body while no frame is up, and closes
+## when the client ends. Off-headset it takes keys only through [method send_input].
 ## Call once, before first focus. `screen` is an out-of-tree compositor_screen.tscn;
 ## null makes one, whose server and client start on entering the tree.
 func host_compositor_surface(screen: MeshInstance3D = null) -> void:
 	if _surface:
 		return
 	_surface = screen if screen else COMPOSITOR_SCREEN.instantiate()
-	# Hidden, the viewport's collider is off too; it never takes keys again.
+	# Content now only shows the waiting body; it never takes keys again.
+	set_content(WAITING_CONTENT)
 	content_3d.visible = false
 	content_3d.input_keyboard = false
 	content_3d.input_gamepad = false
@@ -201,6 +210,16 @@ func host_compositor_surface(screen: MeshInstance3D = null) -> void:
 	_surface.pointer_event.connect(_on_pointer_event)
 	# Deferred, so the close never runs inside the compositor's event dispatch.
 	_surface.client_ended.connect(close, CONNECT_DEFERRED)
+	# Header included, so it never shows ahead of the content.
+	visible = false
+	_surface.visibility_changed.connect(_on_surface_visibility_changed)
+	var reveal_timer := Timer.new()
+	reveal_timer.one_shot = true
+	reveal_timer.autostart = true
+	reveal_timer.wait_time = first_frame_timeout
+	reveal_timer.timeout.connect(_reveal)
+	reveal_timer.timeout.connect(reveal_timer.queue_free)
+	add_child(reveal_timer)
 	_surface_root = Node3D.new()
 	_surface_root.name = "Surface"
 	_surface_root.transform = content_3d.transform
@@ -215,6 +234,40 @@ func host_compositor_surface(screen: MeshInstance3D = null) -> void:
 		else:
 			_surface.ready.connect(
 					_surface.set_process_unhandled_key_input.bind(false), CONNECT_ONE_SHOT)
+
+
+func _on_surface_visibility_changed() -> void:
+	# A shutdown that skipped close(), such as the app quitting, ends here instead.
+	if _surface.is_shutting_down():
+		visible = false
+		set_interaction_locked(true)
+		return
+	# The screen's own flag turns on only once a client frame is bound.
+	if _surface.visible:
+		_reveal()
+	else:
+		_sync_waiting_body()
+
+
+## Shows a compositor window held hidden by [method host_compositor_surface].
+func _reveal() -> void:
+	if not _closing and not _surface.is_shutting_down():
+		visible = true
+		_sync_waiting_body()
+
+
+## Shows the waiting body in place of a compositor surface that has no frame to
+## show. Both sit on one plane, so exactly one of them is ever visible.
+func _sync_waiting_body() -> void:
+	var waiting := not is_suspended and not _surface.visible
+	# Named on every sync: the screen reads its client override only in _ready.
+	if waiting:
+		var body := content_3d.get_scene_instance()
+		var label := body.get_node_or_null("Label") as Label if body else null
+		if label:
+			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			label.text = "Waiting for %s" % _surface.get_client_command().get_file()
+	content_3d.visible = waiting
 
 
 ## Whether this window keeps a fixed size, ignoring resize requests.
@@ -322,6 +375,7 @@ func set_suspended(suspended: bool) -> void:
 	if _surface_root:
 		# Hiding the screen also disables its collider and ends any press on it.
 		_surface_root.visible = not suspended
+		_sync_waiting_body()
 	else:
 		content_3d.visible = not suspended
 	header_3d.visible = not suspended

@@ -255,6 +255,16 @@ func _finish_shutdown() -> void:
 	shutdown_finished.emit()
 
 
+## Whether [method request_shutdown] has been accepted.
+func is_shutting_down() -> bool:
+	return _shutdown_requested
+
+
+## The client command, for naming the client to the user.
+func get_client_command() -> String:
+	return _client_command
+
+
 ## Whether [signal shutdown_finished] has already fired, so a caller that arrives
 ## late does not await it forever.
 func is_shut_down() -> bool:
