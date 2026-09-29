@@ -137,6 +137,13 @@ void wlb_toplevel_set_activated(wlb_server *server, int activated);
 void wlb_set_initial_size(wlb_server *server, uint32_t width, uint32_t height);
 
 /*
+ * xdg-decoration mode sent to every client that asks: nonzero (the default)
+ * tells it not to draw its own title bar, zero lets it. Applies to a live
+ * client immediately.
+ */
+void wlb_set_server_side_decorations(wlb_server *server, int enabled);
+
+/*
  * wl_output scale: a HiDPI client renders scale-times more pixels, for legible
  * text at distance. Default 1; values below 1 are ignored. Safe after clients
  * bind -- the new scale is pushed to them.

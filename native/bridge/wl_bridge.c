@@ -23,6 +23,7 @@
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_shm.h>
+#include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 #include <wlr/version.h>
@@ -33,7 +34,8 @@
 /* Protocol versions we implement. Bumping these is a protocol commitment. */
 #define WLB_COMPOSITOR_VERSION 6
 #define WLB_SHM_VERSION 1
-#define WLB_XDG_SHELL_VERSION 3
+/* v5 is the first with xdg_toplevel.wm_capabilities, which we send empty. */
+#define WLB_XDG_SHELL_VERSION 5
 /* v3 carries scale, done and release; name/description (v4) are not sent. */
 #define WLB_OUTPUT_VERSION 3
 
@@ -67,6 +69,12 @@ struct wlb_server {
 
 	struct wlr_compositor *compositor;
 	struct wlr_xdg_shell *xdg_shell;
+
+	/* The SWindow header is the window's frame, so clients are told not to draw
+	 * one (server-side mode). Client-side stays selectable for tests. */
+	struct wlr_xdg_decoration_manager_v1 *decoration_manager;
+	struct wlr_xdg_toplevel_decoration_v1 *decoration;  /* tracked toplevel's */
+	int server_side_decorations;
 
 	/* One static wl_output; a HiDPI client renders buffers output_scale times larger. */
 	struct wl_global *output_global;
@@ -119,7 +127,13 @@ struct wlb_server {
 	struct wl_listener surface_destroy;
 	struct wl_listener xdg_surface_commit;
 	struct wl_listener xdg_toplevel_destroy;
+	struct wl_listener request_maximize;
+	struct wl_listener request_fullscreen;
+	struct wl_listener request_minimize;
 	int listeners_armed;
+	struct wl_listener new_decoration;
+	struct wl_listener decoration_request_mode;
+	struct wl_listener decoration_destroy;
 };
 
 
@@ -237,6 +251,8 @@ static void send_frame_done(wlb_server *server)
 static void send_output_enter(wlb_server *server, struct wlr_surface *surface);
 /* Defined with the seat code; the unmap and teardown paths need it here. */
 static void clear_keyboard_focus(wlb_server *server);
+/* Defined with the decoration code; the initial commit needs it here. */
+static void apply_decoration_mode(wlb_server *server);
 
 
 /*
@@ -329,6 +345,9 @@ static void detach_surface(wlb_server *server)
 	wl_list_remove(&server->surface_destroy.link);
 	wl_list_remove(&server->xdg_surface_commit.link);
 	wl_list_remove(&server->xdg_toplevel_destroy.link);
+	wl_list_remove(&server->request_maximize.link);
+	wl_list_remove(&server->request_fullscreen.link);
+	wl_list_remove(&server->request_minimize.link);
 	server->listeners_armed = 0;
 }
 
@@ -385,6 +404,49 @@ static void handle_xdg_toplevel_destroy(struct wl_listener *listener, void *data
 }
 
 
+/*
+ * Nothing can be maximized or fullscreened, but xdg-shell requires a configure
+ * in reply to a set or unset request; an unchanged one answers both. Before the
+ * initial commit the initial configure is that reply. `wanted` is set vs unset.
+ */
+static void decline_state_request(wlb_server *server, const char *what, bool wanted)
+{
+	/* An unset needs no declining: the state is already off. */
+	bridge_log(wanted ? "declined %s request" : "acknowledged un%s request", what);
+	if (server->toplevel != NULL && server->toplevel->base->initialized) {
+		wlr_xdg_surface_schedule_configure(server->toplevel->base);
+	}
+}
+
+
+static void handle_request_maximize(struct wl_listener *listener, void *data)
+{
+	wlb_server *server = wl_container_of(listener, server, request_maximize);
+
+	(void)data;
+	decline_state_request(server, "maximize", server->toplevel->requested.maximized);
+}
+
+
+static void handle_request_fullscreen(struct wl_listener *listener, void *data)
+{
+	wlb_server *server = wl_container_of(listener, server, request_fullscreen);
+
+	(void)data;
+	decline_state_request(server, "fullscreen", server->toplevel->requested.fullscreen);
+}
+
+
+/* Minimize needs no reply; the client simply stays visible. */
+static void handle_request_minimize(struct wl_listener *listener, void *data)
+{
+	wlb_server *server = wl_container_of(listener, server, request_minimize);
+
+	(void)data;
+	bridge_log("declined minimize request");
+}
+
+
 static void handle_xdg_surface_commit(struct wl_listener *listener, void *data)
 {
 	wlb_server *server = wl_container_of(listener, server, xdg_surface_commit);
@@ -397,6 +459,12 @@ static void handle_xdg_surface_commit(struct wl_listener *listener, void *data)
 	 * lets the client keep the size it chose. */
 	wlr_xdg_toplevel_set_size(server->toplevel, server->initial_width,
 			server->initial_height);
+	/* wlroots advertises every capability by default; an empty set tells the
+	 * client its maximize/fullscreen/minimize buttons and window menu do nothing. */
+	wlr_xdg_toplevel_set_wm_capabilities(server->toplevel, 0);
+	bridge_log("wm capabilities: none advertised");
+	/* A decoration created before this commit could not be answered yet. */
+	apply_decoration_mode(server);
 	/* wl_compositor v6 HiDPI, set now so the first buffer is already scaled.
 	 * Legacy toolkits ignore it and use the wl_output.enter sent on map. */
 	wlr_surface_set_preferred_buffer_scale(server->surface,
@@ -434,9 +502,104 @@ static void handle_new_toplevel(struct wl_listener *listener, void *data)
 	wl_signal_add(&server->surface->events.commit, &server->xdg_surface_commit);
 	server->xdg_toplevel_destroy.notify = handle_xdg_toplevel_destroy;
 	wl_signal_add(&toplevel->events.destroy, &server->xdg_toplevel_destroy);
+	server->request_maximize.notify = handle_request_maximize;
+	wl_signal_add(&toplevel->events.request_maximize, &server->request_maximize);
+	server->request_fullscreen.notify = handle_request_fullscreen;
+	wl_signal_add(&toplevel->events.request_fullscreen,
+			&server->request_fullscreen);
+	server->request_minimize.notify = handle_request_minimize;
+	wl_signal_add(&toplevel->events.request_minimize, &server->request_minimize);
 	server->listeners_armed = 1;
 
 	bridge_log("toplevel accepted");
+}
+
+
+/* --- decorations -------------------------------------------------------- */
+
+static const char *decoration_mode_name(enum wlr_xdg_toplevel_decoration_v1_mode mode)
+{
+	switch (mode) {
+	case WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE:
+		return "client-side";
+	case WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE:
+		return "server-side";
+	default:
+		return "none";
+	}
+}
+
+
+/*
+ * Sends the tracked decoration our mode whatever the client asked for. Waits
+ * for the initial commit, since wlroots asserts on configuring before it.
+ */
+static void apply_decoration_mode(wlb_server *server)
+{
+	struct wlr_xdg_toplevel_decoration_v1 *decoration = server->decoration;
+	enum wlr_xdg_toplevel_decoration_v1_mode mode = server->server_side_decorations
+			? WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE
+			: WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+
+	if (decoration == NULL || !decoration->toplevel->base->initialized) {
+		return;
+	}
+	wlr_xdg_toplevel_decoration_v1_set_mode(decoration, mode);
+	bridge_log("decoration mode: %s (client requested %s)",
+			decoration_mode_name(mode),
+			decoration_mode_name(decoration->requested_mode));
+}
+
+
+/* Unhooks the tracked decoration's listeners. A no-op when none is tracked. */
+static void detach_decoration(wlb_server *server)
+{
+	if (server->decoration == NULL) {
+		return;
+	}
+	wl_list_remove(&server->decoration_request_mode.link);
+	wl_list_remove(&server->decoration_destroy.link);
+	server->decoration = NULL;
+}
+
+
+static void handle_decoration_request_mode(struct wl_listener *listener, void *data)
+{
+	wlb_server *server = wl_container_of(listener, server,
+			decoration_request_mode);
+
+	(void)data;
+	apply_decoration_mode(server);
+}
+
+
+static void handle_decoration_destroy(struct wl_listener *listener, void *data)
+{
+	wlb_server *server = wl_container_of(listener, server, decoration_destroy);
+
+	(void)data;
+	detach_decoration(server);
+	bridge_log("decoration destroyed");
+}
+
+
+/* Tracks the decoration of the tracked toplevel; any other toplevel is closing. */
+static void handle_new_decoration(struct wl_listener *listener, void *data)
+{
+	wlb_server *server = wl_container_of(listener, server, new_decoration);
+	struct wlr_xdg_toplevel_decoration_v1 *decoration = data;
+
+	if (decoration->toplevel != server->toplevel || server->decoration != NULL) {
+		return;
+	}
+	server->decoration = decoration;
+	server->decoration_request_mode.notify = handle_decoration_request_mode;
+	wl_signal_add(&decoration->events.request_mode,
+			&server->decoration_request_mode);
+	server->decoration_destroy.notify = handle_decoration_destroy;
+	wl_signal_add(&decoration->events.destroy, &server->decoration_destroy);
+	bridge_log("decoration created");
+	apply_decoration_mode(server);
 }
 
 
@@ -835,6 +998,13 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 		bridge_log("compositor or xdg-shell creation failed");
 		goto fail;
 	}
+	server->server_side_decorations = 1;
+	server->decoration_manager =
+			wlr_xdg_decoration_manager_v1_create(server->display);
+	if (server->decoration_manager == NULL) {
+		bridge_log("xdg-decoration manager creation failed");
+		goto fail;
+	}
 
 	if (!setup_seat(server)) {
 		bridge_log("seat setup failed");
@@ -853,12 +1023,16 @@ wlb_server *wlb_create(char *socket_out, size_t socket_len)
 	}
 
 	/*
-	 * Attached last, once nothing can fail: xdg-shell asserts on destroy if a
-	 * listener is still attached, so wlb_destroy removes it only when set.
+	 * Attached last, once nothing can fail: xdg-shell and xdg-decoration assert
+	 * on destroy if a listener is still attached, so wlb_destroy removes each
+	 * only when set.
 	 */
 	server->new_toplevel.notify = handle_new_toplevel;
 	wl_signal_add(&server->xdg_shell->events.new_toplevel,
 			&server->new_toplevel);
+	server->new_decoration.notify = handle_new_decoration;
+	wl_signal_add(&server->decoration_manager->events.new_toplevel_decoration,
+			&server->new_decoration);
 
 	if (socket_out != NULL && socket_len > 0) {
 		snprintf(socket_out, socket_len, "%s", server->socket);
@@ -1075,6 +1249,16 @@ void wlb_set_initial_size(wlb_server *server, uint32_t width, uint32_t height)
 }
 
 
+void wlb_set_server_side_decorations(wlb_server *server, int enabled)
+{
+	if (server == NULL) {
+		return;
+	}
+	server->server_side_decorations = enabled ? 1 : 0;
+	apply_decoration_mode(server);
+}
+
+
 void wlb_set_output_scale(wlb_server *server, int32_t scale)
 {
 	struct wl_resource *output;
@@ -1113,8 +1297,12 @@ void wlb_destroy(wlb_server *server)
 
 	drop_pending(server);
 	detach_surface(server);
+	detach_decoration(server);
 	if (server->new_toplevel.notify != NULL) {
 		wl_list_remove(&server->new_toplevel.link);
+	}
+	if (server->new_decoration.notify != NULL) {
+		wl_list_remove(&server->new_decoration.link);
 	}
 	/* Stop new binds; existing output resources are freed with their clients. */
 	if (server->output_global != NULL) {
