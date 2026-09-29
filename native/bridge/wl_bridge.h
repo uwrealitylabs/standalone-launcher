@@ -34,10 +34,13 @@ typedef struct {
 
 
 /*
- * A read window onto a locked buffer, sized in buffer pixels (the logical size
- * times the client's buffer scale). Valid only between a successful
- * wlb_frame_acquire() and the matching wlb_frame_release(); `data` dangles
- * after release.
+ * A read window onto a locked buffer, cropped to the window geometry and sized
+ * in buffer pixels (the logical size times the client's buffer scale). `stride`
+ * is the whole buffer's. The crop honours the client's buffer transform, but the
+ * pixels are not turned back upright: with a 90-degree transform an 80x60 window
+ * should arrive as an upright 80x60 frame, but arrives as a sideways 60x80 one.
+ * Valid only between a successful wlb_frame_acquire() and the matching
+ * wlb_frame_release(); `data` dangles after release.
  */
 typedef struct {
 	const uint8_t *data;
@@ -84,8 +87,8 @@ int wlb_next_event(wlb_server *server, wlb_event *out);
 int wlb_is_mapped(const wlb_server *server);
 
 /*
- * Last known logical surface size -- the buffer size divided by the client's
- * buffer scale; zero when nothing is mapped.
+ * Last known logical size of the window geometry -- the surface minus any
+ * client-drawn shadow; zero when nothing is mapped.
  */
 void wlb_surface_size(const wlb_server *server, uint32_t *width, uint32_t *height);
 
@@ -109,9 +112,10 @@ int wlb_frame_acquire(wlb_server *server, wlb_frame *out);
 void wlb_frame_release(wlb_server *server, int accepted);
 
 /*
- * Pointer input in surface-local logical units (see wlb_surface_size). Each call
- * ends with exactly one pointer frame, so the caller never sends one. A press
- * starts an implicit grab: motion and release reach the surface even outside it.
+ * Pointer input in logical units relative to the window geometry (see
+ * wlb_surface_size). Each call ends with exactly one pointer frame, so the caller
+ * never sends one. A press starts an implicit grab: motion and release reach the
+ * surface even outside it.
  */
 void wlb_pointer_enter(wlb_server *server, double sx, double sy);
 void wlb_pointer_motion(wlb_server *server, double sx, double sy);

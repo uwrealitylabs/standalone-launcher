@@ -493,7 +493,7 @@ Dictionary WaylandCompositor::get_stats() const
 
 
 /*
- * UV to surface-local pixels against the current mapped size. Not clamped: an
+ * UV to window-geometry pixels against the current mapped size. Not clamped: an
  * implicit grab legitimately reports coordinates outside [0, size], and the
  * bridge forwards them to the grabbing surface unchanged.
  */

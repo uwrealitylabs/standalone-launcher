@@ -25,7 +25,9 @@
 #include <wlr/types/wlr_shm.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/util/box.h>
 #include <wlr/util/log.h>
+#include <wlr/util/transform.h>
 #include <wlr/version.h>
 
 #define WLB_EVENT_RING 16
@@ -103,6 +105,8 @@ struct wlb_server {
 	struct wlr_xdg_toplevel *toplevel;
 	struct wlr_surface *surface;
 	int mapped;
+	/* Window geometry in surface-local logical units; width/height are its size. */
+	struct wlr_box geometry;
 	uint32_t width, height;
 
 	/*
@@ -113,6 +117,8 @@ struct wlb_server {
 	 * commits inside one Godot frame collapse to the newest.
 	 */
 	struct wlr_buffer *pending;
+	/* The window geometry in `pending`'s pixels; empty means the whole buffer. */
+	struct wlr_box pending_crop;
 	int access_open;
 
 	wlb_event ring[WLB_EVENT_RING];
@@ -256,30 +262,79 @@ static void apply_decoration_mode(wlb_server *server);
 
 
 /*
- * Tracks the mapped surface's logical size, reporting changes as RESIZED, and
+ * The toplevel's window geometry clipped to its surface, in surface-local
+ * logical units; the whole surface when the client set none that overlaps it.
+ */
+static struct wlr_box window_geometry(const wlb_server *server)
+{
+	const struct wlr_surface *surface = server->surface;
+	struct wlr_box bounds = {0, 0, 0, 0};
+	struct wlr_box geometry;
+
+	if (surface == NULL) {
+		return bounds;
+	}
+	bounds.width = surface->current.width > 0 ? surface->current.width : 0;
+	bounds.height = surface->current.height > 0 ? surface->current.height : 0;
+	/* wlroots already defaults an unset geometry to the surface extents. */
+	if (server->toplevel == NULL || !wlr_box_intersection(&geometry,
+			&server->toplevel->base->geometry, &bounds)) {
+		return bounds;
+	}
+	return geometry;
+}
+
+
+/*
+ * Maps a surface-local box into buffer pixels: scaled, then through the
+ * buffer transform. Empty under wp_viewporter, whose mapping is not modelled.
+ */
+static struct wlr_box surface_to_buffer_box(const struct wlr_surface_state *state,
+		const struct wlr_box *box)
+{
+	struct wlr_box scaled = *box;
+	struct wlr_box out = {0, 0, 0, 0};
+
+	if (state->viewport.has_src || state->viewport.has_dst) {
+		return out;
+	}
+	scaled.x *= state->scale;
+	scaled.y *= state->scale;
+	scaled.width *= state->scale;
+	scaled.height *= state->scale;
+	/* The extents are the box's own space: the surface, scaled to pixels. */
+	wlr_box_transform(&out, &scaled, wlr_output_transform_invert(state->transform),
+			state->width * state->scale, state->height * state->scale);
+	return out;
+}
+
+
+/*
+ * Tracks the mapped window geometry, reporting size changes as RESIZED, and
  * locks each newly committed buffer as the frame wlb_frame_acquire hands out.
  */
 static void handle_surface_commit(struct wl_listener *listener, void *data)
 {
 	wlb_server *server = wl_container_of(listener, server, surface_commit);
 	struct wlr_surface *surface = server->surface;
-	uint32_t w, h;
+	struct wlr_box geometry;
 
 	(void)data;
 	if (surface == NULL) {
 		return;
 	}
 
-	/* Logical size, not buffer pixels (scale 2: a 1612x982 buffer is 806x491), since
-	 * input divides by it. The frame path copies the full buffer separately. */
-	w = (uint32_t)(surface->current.width > 0 ?
-			surface->current.width : 0);
-	h = (uint32_t)(surface->current.height > 0 ?
-			surface->current.height : 0);
-	if (server->mapped && (w != server->width || h != server->height)) {
-		server->width = w;
-		server->height = h;
-		push_event(server, WLB_EVENT_RESIZED, w, h);
+	/* Logical units, not buffer pixels (scale 2: a 1612x982 buffer is 806x491),
+	 * since input divides by them. The xdg role has already applied the geometry. */
+	geometry = window_geometry(server);
+	if (server->mapped) {
+		server->geometry = geometry;
+		if ((uint32_t)geometry.width != server->width
+				|| (uint32_t)geometry.height != server->height) {
+			server->width = (uint32_t)geometry.width;
+			server->height = (uint32_t)geometry.height;
+			push_event(server, WLB_EVENT_RESIZED, server->width, server->height);
+		}
 	}
 
 	if (surface->current.buffer == NULL) {
@@ -292,6 +347,7 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
 	 */
 	drop_pending(server);
 	server->pending = wlr_buffer_lock(surface->current.buffer);
+	server->pending_crop = surface_to_buffer_box(&surface->current, &geometry);
 }
 
 
@@ -302,15 +358,15 @@ static void handle_surface_map(struct wl_listener *listener, void *data)
 
 	(void)data;
 	server->mapped = 1;
-	if (surface != NULL) {
-		/* Logical size, matching handle_surface_commit -- see the note there. */
-		server->width = (uint32_t)(surface->current.width > 0 ?
-				surface->current.width : 0);
-		server->height = (uint32_t)(surface->current.height > 0 ?
-				surface->current.height : 0);
-	}
+	/* Logical units, matching handle_surface_commit -- see the note there. */
+	server->geometry = window_geometry(server);
+	server->width = (uint32_t)server->geometry.width;
+	server->height = (uint32_t)server->geometry.height;
 	send_output_enter(server, surface);
-	bridge_log("surface mapped: %ux%u", server->width, server->height);
+	bridge_log("surface mapped: %ux%u at %d,%d in a %dx%d surface", server->width,
+			server->height, server->geometry.x, server->geometry.y,
+			surface != NULL ? surface->current.width : 0,
+			surface != NULL ? surface->current.height : 0);
 	push_event(server, WLB_EVENT_MAPPED, server->width, server->height);
 }
 
@@ -372,6 +428,7 @@ static void teardown_client(wlb_server *server)
 	server->surface = NULL;
 	server->toplevel = NULL;
 	server->mapped = 0;
+	server->geometry = (struct wlr_box){0, 0, 0, 0};
 	server->width = 0;
 	server->height = 0;
 	bridge_log("tracked toplevel removed");
@@ -1081,6 +1138,7 @@ int wlb_frame_acquire(wlb_server *server, wlb_frame *out)
 	void *data = NULL;
 	uint32_t format = 0;
 	size_t stride = 0;
+	struct wlr_box bounds, crop;
 
 	if (server == NULL || out == NULL || server->pending == NULL
 			|| server->access_open) {
@@ -1114,10 +1172,16 @@ int wlb_frame_acquire(wlb_server *server, wlb_frame *out)
 		return 0;
 	}
 
+	/* Clamp to the buffer: the crop came from surface state the buffer may not match. */
+	bounds = (struct wlr_box){0, 0, server->pending->width, server->pending->height};
+	if (!wlr_box_intersection(&crop, &server->pending_crop, &bounds)) {
+		crop = bounds;
+	}
+
 	server->access_open = 1;
-	out->data = (const uint8_t *)data;
-	out->width = (uint32_t)server->pending->width;
-	out->height = (uint32_t)server->pending->height;
+	out->data = (const uint8_t *)data + (size_t)crop.y * stride + (size_t)crop.x * 4;
+	out->width = (uint32_t)crop.width;
+	out->height = (uint32_t)crop.height;
 	out->stride = stride;
 	out->drm_format = format;
 	return 1;
@@ -1148,7 +1212,8 @@ void wlb_pointer_enter(wlb_server *server, double sx, double sy)
 	}
 	/* Unlike the raw motion/button sends, notify_enter already sends its own
 	 * wl_pointer.frame, so the bridge must not add a second one. */
-	wlr_seat_pointer_notify_enter(server->seat, server->surface, sx, sy);
+	wlr_seat_pointer_notify_enter(server->seat, server->surface,
+			sx + server->geometry.x, sy + server->geometry.y);
 }
 
 
@@ -1157,7 +1222,8 @@ void wlb_pointer_motion(wlb_server *server, double sx, double sy)
 	if (server == NULL || server->seat == NULL) {
 		return;
 	}
-	wlr_seat_pointer_notify_motion(server->seat, now_msec(), sx, sy);
+	wlr_seat_pointer_notify_motion(server->seat, now_msec(),
+			sx + server->geometry.x, sy + server->geometry.y);
 	wlr_seat_pointer_notify_frame(server->seat);
 }
 
