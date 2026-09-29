@@ -294,6 +294,7 @@ void WaylandCompositor::_process(double delta)
 	if (server == nullptr) {
 		return;
 	}
+	frames_processed++;
 	if (delta > slow_frame_budget) {
 		/*
 		 * A heuristic on Godot's own frame delta, not an OpenXR statistic. It
@@ -454,6 +455,7 @@ Dictionary WaylandCompositor::get_stats() const
 
 	out["frames_copied"] = frames_copied;
 	out["frames_rejected"] = frames_rejected;
+	out["frames_processed"] = frames_processed;
 	out["slow_frames"] = slow_frames;
 	/*
 	 * The cached size rather than get_surface_size(): Godot exits children

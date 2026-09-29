@@ -106,6 +106,8 @@ private:
 	Vector2i last_mapped_size;
 	int64_t frames_copied = 0;
 	int64_t frames_rejected = 0;
+	// Godot frames seen while running: the denominator for slow_frames.
+	int64_t frames_processed = 0;
 	int64_t slow_frames = 0;
 	double slow_frame_budget = 1.0 / 72.0;
 };
