@@ -1,7 +1,5 @@
 extends Node3D
 
-const COMPOSITOR_SCREEN_PATH := "WindowManager/CompositorScreen"
-
 var xr_interface: XRInterface
 
 ## Set once a close request is being handled, so a second close during the
@@ -31,16 +29,19 @@ func _notification(what: int) -> void:
 		_shutdown_and_quit()
 
 
-## Runs the compositor's frame-driven shutdown, then quits. Awaiting
-## shutdown_finished keeps rendering alive through the client's grace period rather
-## than blocking on teardown; the screen emits it even with nothing to stop, so the
-## await never hangs on hosts without the compositor.
+## Runs every compositor screen's frame-driven shutdown, then quits. Awaiting
+## shutdown_finished keeps rendering alive through each client's grace period
+## rather than blocking on teardown; a screen emits it even with nothing to stop,
+## so the await never hangs on hosts without the compositor.
 func _shutdown_and_quit() -> void:
 	if _quitting:
 		return
 	_quitting = true
-	var screen := get_node_or_null(COMPOSITOR_SCREEN_PATH)
-	if screen != null and screen.has_method("request_shutdown"):
+	var screens := get_tree().get_nodes_in_group(&"wayland_surfaces")
+	# Request them all first so their grace periods overlap.
+	for screen in screens:
 		screen.request_shutdown()
-		await screen.shutdown_finished
+	for screen in screens:
+		if is_instance_valid(screen) and not screen.is_shut_down():
+			await screen.shutdown_finished
 	get_tree().quit()
