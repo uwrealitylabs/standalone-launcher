@@ -3,6 +3,8 @@ extends Control
 
 @onready var input_line: LineEdit = $VBoxContainer/InputLine
 @onready var output_display: RichTextLabel = $VBoxContainer/OutputDisplay
+@onready var v_box_container: VBoxContainer = $VBoxContainer
+@onready var background: ColorRect = $Background
 
 var current_dir: String = OS.get_executable_path().get_base_dir()
 var is_running: bool = false
@@ -20,6 +22,8 @@ var _shown := 0
 func _ready():
 	stdout("[color=yellow]SYSTEM READY[/color]")
 	input_line.text_submitted.connect(_on_submit)
+	get_viewport().size_changed.connect(_on_viewport_resized)
+	_on_viewport_resized()
 
 
 func _process(_delta):
@@ -53,6 +57,12 @@ func _input(input: InputEvent) -> void:
 func _exit_tree() -> void:
 	if _current != null and not _current.is_finished:
 		_current.cancel()
+
+## Resizes VBoxContainer to viewport size
+func _on_viewport_resized():
+	var _size = get_viewport().get_visible_rect().size  # root Control
+	v_box_container.size = _size
+	background.size = _size
 
 
 ## Appends `text` to the output as a whole line. Writing to the output any other
