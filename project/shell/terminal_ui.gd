@@ -12,7 +12,7 @@ var is_running: bool = false
 var _current: AsyncCommand = null
 # Paragraph holding the "Running..." notice, or -1 when none is showing.
 var _running_line := -1
-# Where "cd -"nxrayman19@gmail.com goes back to. Empty until the first successful cd.
+# Where "cd -" goes back to. Empty until the first successful cd.
 var _previous_dir := ""
 # Characters of the running command's output already on screen, so the tail
 # that arrives after the last poll can be told apart from what was shown live.
