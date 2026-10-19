@@ -122,14 +122,21 @@ scope ends by itself when its last process exits, and `--collect` removes it eve
 forced stop. Orphans reparent to init, which reaps them, so add a subreaper helper only
 if the chosen implementation turns out to need explicit adoption. With no systemd user
 session, `systemd-run` fails with a clear message; launch fails rather than falling back
-to a process group. See the [kernel's cgroup v2 documentation][cgroup-v2].
+to a process group. Rely on systemd's own scope stop ([`KillMode=control-group`][systemd-kill])
+rather than v2-only kernel interfaces such as `cgroup.kill`, so cleanup works on both cgroup
+v1 hybrid and v2 hierarchies.
 
-The VM (systemd 259) confirmed this on 2026-10-18: the exit status passes through;
-`setsid` and double-forked jobs stay in the scope after the wrapper exits; a stop with a 2 s
-grace kills TERM-ignoring jobs in about 2 s and leaves no unit; a missing binary or user
-manager is reported on stderr. Docker usually lacks a user systemd, so a skipped container
-run is not a pass. Whether the board starts the launcher inside a systemd user session is
-a deferred board check.
+Verified on 2026-10-18 in the VM (systemd 259, cgroup v2) and on a cloud RB5 running the
+stock Qualcomm image (Ubuntu 20.04, systemd 245, cgroup v1 hybrid). In both, the exit status
+passes through; `setsid` and double-forked jobs stay in the scope after the wrapper exits;
+a stop with a 2 s grace kills TERM-ignoring jobs in about 2 s and leaves no unit; a missing
+binary is reported on stderr (the VM also checked a missing user manager). The cloud RB5 is
+not our board: its GPU stack and startup configuration may differ, so our RB5 remains
+unvalidated. Docker usually lacks a user systemd, so a skipped container run is not a pass.
+
+Both runs used an interactive SSH login, which starts the user manager. Whether one exists
+when the launcher starts automatically at boot is a deferred board check; lingering
+([`loginctl enable-linger`][loginctl]) is a candidate fix, not yet validated.
 
 **Seat ownership:** one `WaylandPointerRouter` owns arbitration for each session's seat;
 window views forward events carrying their `WindowId` to that shared router. C1 already
@@ -264,7 +271,9 @@ server and socket. Build argv and the environment in one place, without shell in
 Start the session's private bus as its own scope, `dbus-daemon --session --nofork
 --address=unix:path=<session dir>/bus`, then the app in M0's app scope with that address.
 Do not use [`dbus-run-session`][dbus-run-session]: it ends the bus when its direct child
-exits; the VM confirmed that a forked-off descendant then loses the bus while running.
+exits, so a forked-off descendant loses the bus while still running (seen in the VM and on
+the cloud RB5 with dbus 1.12). Both also confirmed that a bus in its own scope stays
+reachable from the app's descendants; that proves the setup, not app compatibility.
 A separate bus scope lives as long as the session and keeps bus processes out of the app
 scope's liveness. The session stays alive while its app scope has processes or windows,
 not while the first process does: wrappers that exit after forking are normal. Report
@@ -277,8 +286,8 @@ scope, is unsupported and must be recorded.
 
 `dbus-daemon` is required, like the user systemd: without it, launch fails with a clear
 message. Remove inherited `DBUS_STARTER_*` variables and always set the session address, so
-apps never fall back to the host bus. Test that a GTK and a Qt app with a host
-single-instance copy already running connect only to the session bus and open locally.
+apps never fall back to the host bus. Still pending: test that a GTK and a Qt app with a
+host single-instance copy already running connect only to the session bus and open locally.
 
 A private bus is not a universal single-instance guarantee: application locks
 outside D-Bus may still redirect launches. An exit code alone cannot identify the failing
@@ -558,11 +567,13 @@ per app: a game does not need to have a menu bar or an editable document.
 | GL clients fail on the board's shm-only path | Unverified until RB5 returns; record VM setup. |
 | No `dbus-daemon`, or apps need host services | Launch fails clearly; record affected apps. |
 | Missing board packages or different confinement | Check when RB5 returns; record gaps. |
+| Representative apps absent from the board image | GTK/Qt/SDL samples may need installing first. |
+| Stock Qualcomm image already runs Weston | Settle DRM coexistence or replacement at bring-up. |
 | Large buffers or many surfaces cost too much CPU | Scaling saves no copying; measure early. |
 | Popup clipping hides menu items | Record as a usability caveat; overflow panels are deferred. |
 | One slot free for apps | Accept for C2; slot count is windowing's call. |
 | Pinches misclassified by hand-tracking jitter | Simulator tests now; board tuning deferred. |
-| No user systemd where the board starts the launcher | Prove in the VM; check on the board. |
+| No user manager when the launcher starts at boot | Tested over SSH only; check on the board. |
 | Pinch unproven on hand-only hardware | Shared with C1 (simulator only); verify on RB5. |
 
 Software-renderer experiments include `GSK_RENDERER=cairo` or `LIBGL_ALWAYS_SOFTWARE=1`
@@ -575,4 +586,5 @@ are not evidence of an automatic fallback on the board.
   https://wayland.app/protocols/xdg-dialog-v1
 [wayland-core]: https://wayland.freedesktop.org/docs/html/apa.html
 [dbus-run-session]: https://dbus.freedesktop.org/doc/dbus-run-session.1.html
-[cgroup-v2]: https://docs.kernel.org/admin-guide/cgroup-v2.html
+[systemd-kill]: https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html
+[loginctl]: https://www.freedesktop.org/software/systemd/man/latest/loginctl.html
