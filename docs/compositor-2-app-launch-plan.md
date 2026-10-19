@@ -286,8 +286,10 @@ scope, is unsupported and must be recorded.
 
 `dbus-daemon` is required, like the user systemd: without it, launch fails with a clear
 message. Remove inherited `DBUS_STARTER_*` variables and always set the session address, so
-apps never fall back to the host bus. Still pending: test that a GTK and a Qt app with a
-host single-instance copy already running connect only to the session bus and open locally.
+apps never fall back to the host bus. Checked in the VM on 2026-10-18: with a host copy
+already running, GNOME Text Editor (GTK4) and FeatherPad (Qt) launched this way stayed off
+the host bus and opened their own window. Services they activate (portal, a11y bus, gvfs)
+start on the private bus; the portal has no backend there, so GTK only logs warnings.
 
 A private bus is not a universal single-instance guarantee: application locks
 outside D-Bus may still redirect launches. An exit code alone cannot identify the failing
