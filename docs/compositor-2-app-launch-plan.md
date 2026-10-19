@@ -75,7 +75,7 @@ Priority within these milestones:
 
 - **C2a resource-management prerequisites:** reliable lifecycle events and proven session
   process containment. Specify both in M0 and validate them before the M5 checkpoint.
-- **Next:** correct D-Bus fallback in M5 and shared seat ownership before M8 presents
+- **Next:** the per-session bus in M5 and shared seat ownership before M8 presents
   multiple windows. Reuse C1's two-hand arbitration rules, extending their ownership scope.
 - **M9:** explicit gesture cancellation, including tracking loss; keep it with the classifier.
 
@@ -107,13 +107,9 @@ surface targets stay opaque outside the bridge. C1's `client_gone` means its tra
 toplevel was destroyed and must not be reused as session termination.
 
 **Event reliability:** lifecycle and parent changes must arrive in order without loss.
-Replace C1's 16-event, drop-oldest queue before session ownership depends on these events.
-Coalesce only replaceable frame/commit metadata, preserving configure tracking and ordering
-relative to lifecycle changes. If a resource limit prevents reliable delivery, report a
-session failure through a path independent of that queue and clean up; never silently lose
-a create or destroy event. Test bursts exceeding 16 events in one protocol dispatch,
-interleaving commits with create/map/unmap/destroy and parent changes across window IDs.
-Assert that records, focus and slot reservations agree with the bridge after draining.
+Replace C1's fixed 16-event, drop-oldest ring with a queue that grows as needed; the main
+thread drains it every frame, so it stays short. Test a burst of more than 16 mixed events
+in one dispatch and assert that records, focus and slots agree with the bridge after.
 
 **Process containment:** the session needs reliable launch diagnostics and complete
 containment: every process the app starts is found and stopped at cleanup. A process group
@@ -176,35 +172,27 @@ tradeoff of scaling. Popup overflow is a separate limitation documented in M7.
 separate properties. A mapped, visible parented window can take focus without a slot.
 Use the following policy for dialogs (separate toplevels) and menus (popup surfaces):
 
-- **Opening a dialog:** on map, focus moves from the parent to the dialog, including
-  physical and virtual keyboard routing. Suspended groups do not steal focus; defer their
-  focus change until the group is restored. Transition locks defer input until completion.
-- **Parent interaction:** block the parent's app input only for a dialog explicitly marked
-  modal, meaning it must be dealt with first. A click on that parent redirects focus to
-  its active modal descendant. Ordinary parented tool windows leave the parent interactive.
-  For multiple modal children, choose the most recently focused or newly mapped child,
-  descending through its modal children; focus requests for a blocked ancestor use that path.
-  Parenting alone is not evidence of modality. M8 adds the optional `xdg-dialog-v1` hint;
-  clients without it retain responsibility for their own modal filtering. Do not guess
-  modality from window titles or treat every child as a blocking dialog.
+- **Opening a dialog:** on map, focus and keyboard routing move to the dialog. A dialog
+  in a suspended group, or during a transition, takes focus once that ends.
+- **Parent interaction:** block the parent's app input only while it has a dialog marked
+  modal by the optional `xdg-dialog-v1` hint; a click on the blocked parent focuses that
+  dialog (the most recently mapped, if several). Parenting alone is not modality: unmarked
+  children leave the parent interactive, and apps without the hint filter input themselves.
 - **Solo mode:** the root and attached descendants move and hide/show as one group.
   A separate dialog stays centred over its immediate parent and slightly closer to the
   user. Keep its own committed aspect and natural size, fitting it down if needed; do not
   stretch it with the parent's width/height changes. Popups share the parent's texture and
   therefore its uniform display scale; their anchors are updated when the client reflows.
   Solo controls on a child act on the group root. Unrelated groups stay suspended.
-- **Closing a dialog:** if it held focus, return focus to its immediate eligible parent
-  (normally the main window); nested dialogs return to the preceding dialog. Clear that
-  dialog's modal block on unmap, destruction or loss of the modal hint. A remaining modal
-  descendant still takes precedence. If the parent is gone, use group history then normal
-  history. A dialog closing in the background must not steal focus from another app.
+- **Closing a dialog:** if it held focus, return focus to its parent, or to normal focus
+  history if the parent is gone. Its modal block clears on unmap, destruction or loss of
+  the hint. A dialog closing in the background must not steal focus from another app.
 - **Menus:** M7's popup grab and outside-click dismissal rules apply; menus are not separate
   dialog windows and do not consume slots.
 
 The distinction between a parent relation and a modal hint follows
-[xdg-dialog-v1][xdg-dialog]. Toolkit-enforced modality without that hint is a compatibility
-case to verify with real apps, not a reason to disable every parented window's parent.
-Implement these rules in M8, with only the interfaces needed by M5 introduced earlier.
+[xdg-dialog-v1][xdg-dialog]. Implement these rules in M8, with only the interfaces needed
+by M5 introduced earlier.
 
 Required traces, implemented as tests in M5/M8:
 
@@ -287,16 +275,10 @@ Validate wrapper exit before mapping, double forks, `setsid`, and terminal jobs 
 HUP/TERM, plus retry after cleanup. Work handed to unrelated host services, outside the
 scope, is unsupported and must be recorded.
 
-When `dbus-daemon` is absent, explicitly remove inherited session-bus and starter
-variables, then set `DBUS_SESSION_BUS_ADDRESS` to an explicit unavailable Unix-socket address
-under a session-owned private directory. Keep that path absent for the session's lifetime.
-Unsetting the address alone is insufficient: GLib can discover `$XDG_RUNTIME_DIR/bus`
-even with `DISPLAY` unset. Preserve the runtime directory needed by Wayland; prevent bus
-autodiscovery with the explicit address instead. Record this no-bus fallback in diagnostics.
-Test real GTK/GIO and Qt clients with a live host bus at the normal runtime path and a host
-single-instance app already running; assert no host-bus connection or redirected launch.
-If a supported toolkit still discovers the host bus, refuse this fallback until corrected.
-See [GLib's session-bus address lookup][glib-bus-address].
+`dbus-daemon` is required, like the user systemd: without it, launch fails with a clear
+message. Remove inherited `DBUS_STARTER_*` variables and always set the session address, so
+apps never fall back to the host bus. Test that a GTK and a Qt app with a host
+single-instance copy already running connect only to the session bus and open locally.
 
 A private bus is not a universal single-instance guarantee: application locks
 outside D-Bus may still redirect launches. An exit code alone cannot identify the failing
@@ -331,7 +313,7 @@ not every external launch or multiple entries pointing to the same executable.
 
 Tests include equal display names with different IDs, repeat picks with no free slot,
 startup failure and retry, close refusal without signals, wrapper exit before mapping,
-and timeout cleanup of the bus and app descendants. Include the containment and host-bus
+and timeout cleanup of the bus and app descendants. Include the containment and bus
 fixtures above. Check actual process and socket cleanup in the VM; fake-process tests alone
 are insufficient.
 
@@ -394,10 +376,8 @@ any second toplevel. Present the session's tracked toplevels, each in its own `S
   a surviving child with no parent needs a slot and otherwise follows the refusal policy.
   Do not cascade process termination from a parent window's destruction;
 - add `xdg_wm_dialog_v1` using the pinned wlroots version's dialog support, verifying the
-  API in that version. Track modal hint changes and implement M0's input blocking and
-  redirection policy for the parent, leaving independent windows usable. Disable the
-  blocked parent's close/resize actions too; group solo controls remain available through
-  the dialog. An unmarked child leaves its parent selectable;
+  API in that version. Track modal hint changes and apply M0's blocking rule to the
+  parent only, leaving independent windows usable;
 - a dialog in a solo group takes input without exiting solo mode; unrelated groups remain
   suspended. Apply M0's centred placement and aspect-preserving fit throughout the tween.
   Queue focus changes during transition locks, then apply them at completion.
@@ -405,12 +385,11 @@ any second toplevel. Present the session's tracked toplevels, each in its own `S
 Tests: About and save-confirmation dialogs, cancelling close, closing a child while the
 parent becomes usable again, two independent windows with one closed, dialogs during solo
 and transitions, reparenting, parent destruction, and refusal with an uncooperative client.
-Test explicit modal hints, removal of a hint, nested and sibling dialogs, modeless tool
-windows with an interactive parent, toolkit filtering without hints, and background closes
-that do not steal focus. Test two hands on different toplevels sharing one seat: ownership
-handoff, a second press during a drag, and closing a non-owning view without clearing the
-owner's pointer state. Check that both popup and dialog hit coordinates match their
-presentation after entering and exiting solo mode.
+Test a modal hint and its removal, a modeless child with an interactive parent, and
+background closes that do not steal focus. Test two hands on different toplevels sharing one
+seat: ownership handoff, a second press during a drag, and closing a non-owning view without
+clearing the owner's pointer state. Check that both popup and dialog hit coordinates match
+their presentation after entering and exiting solo mode.
 
 **M9. Pinch-drag scrolling.** Pinch and drag to scroll, with content following the hand.
 Our pinch-drag is already Wayland's click-drag (text selection, sliders), so the pinch has
@@ -494,7 +473,7 @@ The threading contract is unchanged: all bridge calls on Godot's main thread.
 
 M0 contracts → C2a: M1 → M2 → M3 → M4 → M5 → C2a Linux/VM checkpoint.
 Prove lifecycle-event delivery and process containment early, before building M5 ownership
-on them. D-Bus fallback correctness is also required at this checkpoint; multi-view seat
+on them. The per-session bus is also required at this checkpoint; multi-view seat
 arbitration is validated in M8, and tracking-loss cancellation remains M9 work.
 Keep changes reviewable; supervision, resize negotiation and launch UI may need separate
 commits within their milestone. Keep C2a on `feat/compositor-2-app-launch` and continue
@@ -517,7 +496,7 @@ regression comparisons. RB5 validation remains a separately tracked follow-up.
   classifier and actual input-path cancellation, including tracking loss and recovery.
 - **Linux integration:** actual exec failures, bus startup failure, wrapper exit before
   child mapping, timeout and forced scope cleanup (double forks, `setsid`, HUP/TERM-resistant
-  jobs), missing user systemd, host-bus fallback, windowless grace, and retry without leaked
+  jobs), missing user systemd or `dbus-daemon`, windowless grace, and retry without leaked
   processes, sockets or slot reservations. Run in the VM, which has a user systemd; include
   real `.desktop` fixtures and quoting cases.
 - **Manual, Linux arm64 VM:** the stage-specific app scenarios below from the app browser.
@@ -548,8 +527,9 @@ per app: a game does not need to have a menu bar or an editable document.
   Extra surfaces, menus, dialogs and scrolling are not C2a requirements. Record apps whose
   launch or close workflow needs them as C2b blockers rather than claiming those flows work.
 - Every M5 failure path, repeat launch and cleanup test passes, including actual Linux
-  process containment and real host-bus fallback tests. Lifecycle bursts lose no ownership
-  events. No supported launch leaks children, sockets, windows or reservations.
+  process containment and checks that apps reach only their session bus. Lifecycle bursts
+  lose no ownership events. No supported launch leaks children, sockets, windows or
+  reservations.
 - Record VM measurements and outstanding board checks. RB5 is unavailable until further
   notice; this checkpoint proceeds using the available Linux and VM evidence.
 
@@ -576,7 +556,7 @@ per app: a game does not need to have a menu bar or an editable document.
 | Risk | Response |
 |---|---|
 | GL clients fail on the board's shm-only path | Unverified until RB5 returns; record VM setup. |
-| No private bus, or shared services required | Validate the fallback; record failures. |
+| No `dbus-daemon`, or apps need host services | Launch fails clearly; record affected apps. |
 | Missing board packages or different confinement | Check when RB5 returns; record gaps. |
 | Large buffers or many surfaces cost too much CPU | Scaling saves no copying; measure early. |
 | Popup clipping hides menu items | Record as a usability caveat; overflow panels are deferred. |
@@ -596,4 +576,3 @@ are not evidence of an automatic fallback on the board.
 [wayland-core]: https://wayland.freedesktop.org/docs/html/apa.html
 [dbus-run-session]: https://dbus.freedesktop.org/doc/dbus-run-session.1.html
 [cgroup-v2]: https://docs.kernel.org/admin-guide/cgroup-v2.html
-[glib-bus-address]: https://github.com/GNOME/glib/blob/main/gio/gdbusaddress.c
