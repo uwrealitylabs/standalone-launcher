@@ -89,7 +89,7 @@ Multi-window rendering and a general window-manager redesign are not prerequisit
 
 | Owner | Lifetime and responsibility |
 |---|---|
-| `AppSession` | Owns one launch's server, socket, bus, supervisor and window records. |
+| `AppSession` | Owns one launch's server, socket, bus, scope and window records. |
 | Window record | Identified by `WindowId`; owns presentation and parent relationship. |
 | Surface record | Bridge-owned buffer and input state; destruction invalidates input targets. |
 
@@ -115,20 +115,25 @@ a create or destroy event. Test bursts exceeding 16 events in one protocol dispa
 interleaving commits with create/map/unmap/destroy and parent changes across window IDs.
 Assert that records, focus and slot reservations agree with the bridge after draining.
 
-**Process containment:** select and prove the Linux containment mechanism before M5's
-checkpoint. A process group is useful for signalling but is not the session's ownership
-boundary: terminal shells and their jobs may change process group or Unix session normally.
-Evaluate a delegated per-app cgroup v2 subtree, whose membership survives those changes;
-record required permissions, setup and availability in a Linux container and the VM. If using
-another mechanism, demonstrate the same cleanup guarantees with the M5 process fixtures.
-A missing containment prerequisite must fail launch before the app starts, rather than
-silently falling back to one process group. See the [kernel's cgroup v2 documentation][cgroup-v2].
+**Process containment:** the session needs reliable launch diagnostics and complete
+containment: every process the app starts is found and stopped at cleanup. A process group
+is not enough, since shells, `setsid` and double forks leave it normally. Use systemd's
+cgroup tracking: start each session in its own transient scope via `systemd-run --user
+--scope --collect -p TimeoutStopSec=<grace>`, which keeps the app our child (exit status
+and stderr stay available) while systemd tracks every descendant. Cleanup stops the scope:
+TERM, then KILL once the grace expires (systemd's default is 90 s, so always set it). The
+scope ends by itself when its last process exits, and `--collect` removes it even after a
+forced stop. Orphans reparent to init, which reaps them, so add a subreaper helper only
+if the chosen implementation turns out to need explicit adoption. With no systemd user
+session, `systemd-run` fails with a clear message; launch fails rather than falling back
+to a process group. See the [kernel's cgroup v2 documentation][cgroup-v2].
 
-Delegation normally comes from systemd, e.g. a `Delegate=yes` user unit or
-`systemd-run --user --scope`. Specify how the launcher obtains its delegated subtree in each
-way it is started; one started outside a systemd user session would otherwise launch nothing.
-While the RB5 is unavailable, check delegation on the Debian 13 Pi 5 as part of M0; the
-RB5's own check remains deferred.
+The VM (systemd 259) confirmed this on 2026-10-18: the exit status passes through;
+`setsid` and double-forked jobs stay in the scope after the wrapper exits; a stop with a 2 s
+grace kills TERM-ignoring jobs in about 2 s and leaves no unit; a missing binary or user
+manager is reported on stderr. Docker usually lacks a user systemd, so a skipped container
+run is not a pass. Whether the board starts the launcher inside a systemd user session is
+a deferred board check.
 
 **Seat ownership:** one `WaylandPointerRouter` owns arbitration for each session's seat;
 window views forward events carrying their `WindowId` to that shared router. C1 already
@@ -207,7 +212,7 @@ Required traces, implemented as tests in M5/M8:
   A interactive. Refusal changes no session state. Destroying A starts the windowless grace;
   expiry enters `STOPPING`, cleanup completes, then one `session_ended` enters `ENDED`.
 - While A is running, create/map child B and focus it. Destroying B restores focus to A;
-  the session remains `RUNNING` with the same server, bus and process supervisor.
+  the session remains `RUNNING` with the same server, bus and scope.
 
 ### C2a — apps start and show
 
@@ -266,26 +271,23 @@ server and socket. Build argv and the environment in one place, without shell in
 | `DISPLAY` | unset | no silent fallback to an X server |
 | `XDG_SESSION_TYPE` | `wayland` | Electron 43 picks its backend from it |
 | `GDK_BACKEND`, `QT_QPA_PLATFORM`, `SDL_VIDEODRIVER` | `wayland` | some builds default to X11 |
-| session bus | private when available | isolate service activation from the host desktop |
+| `DBUS_SESSION_BUS_ADDRESS` | session-owned bus | isolate service activation from the host |
 
-Run `dbus-run-session` around a session supervisor, rather than directly around the app.
-The supervisor remains alive across the initial app process exiting while descendants or
-windows remain. It reports exec failures and process exits separately. Place the bus,
-supervisor and app under M0's containment mechanism before they can spawn uncontained work.
-Define who adopts and reaps orphaned children, and keep a cleanup owner outside the boundary
-that is forcibly killed. Cleanup attempts TERM, escalates after a bounded grace, verifies
-that no contained live processes remain and reaps owned children before stopping the server.
-Do not equate an empty original process group or the supervisor's exit with completion.
-With cgroups, verify live-process emptiness separately from child reaping.
+Start the session's private bus as its own scope, `dbus-daemon --session --nofork
+--address=unix:path=<session dir>/bus`, then the app in M0's app scope with that address.
+Do not use [`dbus-run-session`][dbus-run-session]: it ends the bus when its direct child
+exits; the VM confirmed that a forked-off descendant then loses the bus while running.
+A separate bus scope lives as long as the session and keeps bus processes out of the app
+scope's liveness. The session stays alive while its app scope has processes or windows,
+not while the first process does: wrappers that exit after forking are normal. Report
+exec failures and process exits separately. Cleanup stops the app scope, then the bus
+scope, before stopping the server.
 
-Validate wrapper exit before child mapping, double forks, `setsid`, shell job-control
-process groups, and terminal jobs ignoring HUP/TERM. Include a descendant spawning during
-cleanup, supervisor failure, and retry after cleanup. Ordinary terminal jobs are supported;
-process-group/session changes alone are not grounds to classify them as escaping supervision.
-Deliberate migration outside the containment boundary or work delegated to unrelated host
-services remains unsupported and must be recorded.
+Validate wrapper exit before mapping, double forks, `setsid`, and terminal jobs ignoring
+HUP/TERM, plus retry after cleanup. Work handed to unrelated host services, outside the
+scope, is unsupported and must be recorded.
 
-When `dbus-run-session` is absent, explicitly remove inherited session-bus and starter
+When `dbus-daemon` is absent, explicitly remove inherited session-bus and starter
 variables, then set `DBUS_SESSION_BUS_ADDRESS` to an explicit unavailable Unix-socket address
 under a session-owned private directory. Keep that path absent for the session's lifetime.
 Unsetting the address alone is insufficient: GLib can discover `$XDG_RUNTIME_DIR/bus`
@@ -297,9 +299,8 @@ If a supported toolkit still discovers the host bus, refuse this fallback until 
 See [GLib's session-bus address lookup][glib-bus-address].
 
 A private bus is not a universal single-instance guarantee: application locks
-outside D-Bus may still redirect launches. Also, exit 127 alone cannot identify a missing
-binary; the wrapper uses it for its own errors too. Preserve the failing launch stage and
-diagnostic output. See the [dbus-run-session manual][dbus-run-session].
+outside D-Bus may still redirect launches. An exit code alone cannot identify the failing
+stage, since `systemd-run` and apps share codes like 1; preserve the stage and stderr.
 
 Defined launch and lifecycle outcomes:
 
@@ -307,7 +308,7 @@ Defined launch and lifecycle outcomes:
 |---|---|
 | no free slot | launch refused with a message; nothing starts |
 | executable cannot be started | cleanup; "could not start" with executable and diagnostic |
-| server, bus or supervisor fails | cleanup; "could not start" with failing stage |
+| server, bus or scope fails | cleanup; "could not start" with failing stage |
 | supervised app work exits before mapping | cleanup; "exited" with the available code |
 | no surface before the initial-map deadline | stop the session; "did not open a window" |
 | wrapper exits; descendants/windows remain | keep supervising and any initial-map deadline |
@@ -331,9 +332,8 @@ not every external launch or multiple entries pointing to the same executable.
 Tests include equal display names with different IDs, repeat picks with no free slot,
 startup failure and retry, close refusal without signals, wrapper exit before mapping,
 and timeout cleanup of the bus and app descendants. Include the containment and host-bus
-fixtures above. Check actual process and socket cleanup on Linux; fake-process tests alone
-are insufficient. If Docker lacks the required delegation, run containment checks on the
-Linux VM and record that separately; a skipped container check is not a pass.
+fixtures above. Check actual process and socket cleanup in the VM; fake-process tests alone
+are insufficient.
 
 The menu and terminal take two of the three slots today, so one app fits at a time. That
 is acceptable for C2; freeing slots is windowing work.
@@ -444,10 +444,13 @@ to be classified before the client sees a button:
   cannot distinguish tracking loss from intentional release. After tracking returns, require
   an unpinched observation before accepting a new pinch. Moving off the collider while
   tracking remains valid continues the locked drag and is not cancellation.
-- Prerequisite: the active `openxr_action_map.tres` binds `trigger` only for controller
-  profiles and has no `hand_interaction_ext` profile, so a hands-only runtime may deliver no
-  pinch or hand pose at all. Confirm or add that binding before relying on pinch values or
-  pose tracking validity; the result is unverified until the RB5 is available.
+- Existing prerequisite, not new to M9: the target runtime must provide the pinch/`trigger`
+  input `HandPointer` already reads. C1's click and drag have so far been tested only in the
+  simulator, so this remains an integration risk shared with C1. The active action map has
+  no `hand_interaction_ext` profile, but that alone does not prove input is broken; verify
+  on the RB5 when available.
+- New M9 requirement: tracking loss cancels an in-progress gesture instead of being read
+  as a normal release.
 - Use a project-owned cancellation signal/event adapter; the existing XR Tools enum has
   no CANCELLED member. Route target destruction directly through the shared router rather
   than sending to a freed node. Cover a second hand attempting ownership during a pending
@@ -481,11 +484,8 @@ scroll and button-drag gestures, including recovery while the hand is still pinc
 - `project/windowing/{swindow.gd,window_manager.gd}` — client-driven size, re-enabled
   resize, parented-window groups and normal close routing.
 - `project/launch_service/app_registry.gd`, new session and launch-spec modules — identity,
-  environment, supervision, launch outcomes and repeat-launch focus.
+  environment, the scope-and-bus launch command, launch outcomes and repeat-launch focus.
 - `project/utils/file_utils.gd` — preserve desktop-entry identity during discovery.
-- New Linux supervisor helper — containment, exec status, orphan adoption and child reaping.
-  Orphan adoption needs `prctl(PR_SET_CHILD_SUBREAPER)`, which a shell script cannot make,
-  so plan a small C program under `native/`, built for arm64 alongside the extension.
 - `native/tests/`, `tests/` — protocol, GDScript and real-process tests.
 
 The threading contract is unchanged: all bridge calls on Godot's main thread.
@@ -516,10 +516,10 @@ regression comparisons. RB5 validation remains a separately tracked follow-up.
   gestures/solo transitions; dialog focus and suspension; shared-seat ownership across views;
   classifier and actual input-path cancellation, including tracking loss and recovery.
 - **Linux integration:** actual exec failures, bus startup failure, wrapper exit before
-  child mapping, timeout and forced cleanup across process groups and Unix sessions,
-  HUP/TERM-resistant terminal jobs, supervisor failure, host-bus fallback, windowless grace,
-  and retry without leaked processes, sockets or slot reservations. Run in a Linux arm64
-  container where Docker is available; include real `.desktop` fixtures and quoting cases.
+  child mapping, timeout and forced scope cleanup (double forks, `setsid`, HUP/TERM-resistant
+  jobs), missing user systemd, host-bus fallback, windowless grace, and retry without leaked
+  processes, sockets or slot reservations. Run in the VM, which has a user systemd; include
+  real `.desktop` fixtures and quoting cases.
 - **Manual, Linux arm64 VM:** the stage-specific app scenarios below from the app browser.
 - **Manual, Linux arm64 VM at M5/M6/M8:** record frame-time distribution, copy/composite/
   upload time, CPU/memory usage and buffer sizes for regression comparisons in that VM.
@@ -582,8 +582,8 @@ per app: a game does not need to have a menu bar or an editable document.
 | Popup clipping hides menu items | Record as a usability caveat; overflow panels are deferred. |
 | One slot free for apps | Accept for C2; slot count is windowing's call. |
 | Pinches misclassified by hand-tracking jitter | Simulator tests now; board tuning deferred. |
-| No delegated cgroup where the launcher starts | Prove on the VM and Pi 5 in M0; fail launch. |
-| Hands-only runtime has no pinch binding | Confirm the action map before M9 relies on it. |
+| No user systemd where the board starts the launcher | Prove in the VM; check on the board. |
+| Pinch unproven on hand-only hardware | Shared with C1 (simulator only); verify on RB5. |
 
 Software-renderer experiments include `GSK_RENDERER=cairo` or `LIBGL_ALWAYS_SOFTWARE=1`
 where supported by the installed toolkit. Record these per app; the VM's llvmpipe results
