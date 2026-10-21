@@ -34,6 +34,7 @@ editable = false
 
 [node name="OutputDisplay" type="RichTextLabel" parent="VBoxContainer"]
 layout_mode = 2
+size_flags_vertical = 3
 theme_override_colors/default_color = Color(1, 1, 1, 1)
 bbcode_enabled = true
 text = "[color=green]Terminal Ready...[/color]"
