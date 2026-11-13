@@ -6,8 +6,9 @@
 - **Target:** Godot 4.5, OpenXR, arm64 Linux on the RB 5.
 - **Branch:** `feat/compositor-2-app-launch`, from `feat/compositor-1-input` until that merges.
 - **Delivery:** C2a and C2b are checkpoints on this branch, delivered in one final merge.
-- **Testing constraint:** RB5 unavailable until further notice (2026-10-18). Board checks
-  are deferred follow-up work and do not block this branch's development or merge.
+- **Testing constraint:** RB5 reachable over SSH, as an unprivileged user and as root, since
+  2026-11-13; in-headset checks still wait. Board checks remain follow-up work and do not
+  block this branch's development or merge.
 
 ## Context
 
@@ -130,13 +131,17 @@ Verified on 2026-10-18 in the VM (systemd 259, cgroup v2) and on a cloud RB5 run
 stock Qualcomm image (Ubuntu 20.04, systemd 245, cgroup v1 hybrid). In both, the exit status
 passes through; `setsid` and double-forked jobs stay in the scope after the wrapper exits;
 a stop with a 2 s grace kills TERM-ignoring jobs in about 2 s and leaves no unit; a missing
-binary is reported on stderr (the VM also checked a missing user manager). The cloud RB5 is
-not our board: its GPU stack and startup configuration may differ, so our RB5 remains
-unvalidated. Docker usually lacks a user systemd, so a skipped container run is not a pass.
+binary is reported on stderr (the VM also checked a missing user manager). On 2026-11-13
+the same checks, plus a private bus reachable from an app's descendants, passed on our lab
+RB5 (Arch Linux ARM, systemd 262, cgroup v2) as an unprivileged user. Docker usually lacks a
+user systemd, so a skipped container run is not a pass.
 
-Both runs used an interactive SSH login, which starts the user manager. Whether one exists
-when the launcher starts automatically at boot is a deferred board check; lingering
-([`loginctl enable-linger`][loginctl]) is a candidate fix, not yet validated.
+All runs used an interactive SSH login, which starts the user manager. The lab board starts
+the launcher as root from a script (`rb5-vr-demo`) run in a root SSH shell. Root has no
+lingering, so its user manager runs only while a root login is open; scoped apps would likely
+stop when that login ends, while the demo's detached processes survive. Settle the launch user
+before board workflows; lingering ([`loginctl enable-linger`][loginctl]) is a candidate fix,
+not yet validated.
 
 **Seat ownership:** one `WaylandPointerRouter` owns arbitration for each session's seat;
 window views forward events carrying their `WindowId` to that shared router. C1 already
@@ -414,7 +419,7 @@ to be classified before the client sees a button:
 | cancelled before release | end the gesture without generating a pending click |
 
 - **Slop:** a few millimetres of hand travel. **Hold time:** about 300 ms. Exercise both in
-  the simulator now; tuning with real hand-tracking jitter is deferred until RB5 is available.
+  the simulator now; tuning with real jitter waits for hand tracking on the RB5.
 - Lock both the window and the surface under the initial pinch for a scroll sequence.
   Suppress pointer retargeting while scrolling; compute deltas on the locked window's live
   plane, converted through its display scaling into logical surface units. Sign deltas so
@@ -438,7 +443,7 @@ to be classified before the client sees a button:
   input `HandPointer` already reads. C1's click and drag have so far been tested only in the
   simulator, so this remains an integration risk shared with C1. The active action map has
   no `hand_interaction_ext` profile, but that alone does not prove input is broken; verify
-  on the RB5 when available.
+  on the RB5 once its Monado has a hand-tracking driver.
 - New M9 requirement: tracking loss cancels an in-progress gesture instead of being read
   as a normal release.
 - Use a project-owned cancellation signal/event adapter; the existing XR Tools enum has
@@ -513,7 +518,7 @@ regression comparisons. RB5 validation remains a separately tracked follow-up.
 - **Manual, Linux arm64 VM:** the stage-specific app scenarios below from the app browser.
 - **Manual, Linux arm64 VM at M5/M6/M8:** record frame-time distribution, copy/composite/
   upload time, CPU/memory usage and buffer sizes for regression comparisons in that VM.
-- **Deferred, RB5 when available:** run available representatives and record D-Bus/AppArmor
+- **Deferred, RB5 board follow-up:** run available representatives and record D-Bus/AppArmor
   behaviour plus frame-time distribution, upload/copy/composite time, CPU and memory usage,
   logical/buffer dimensions and software-renderer settings. Compare against C1 at matched
   sizes and include multiple surfaces/windows. Record regressions and the supported
@@ -541,8 +546,8 @@ per app: a game does not need to have a menu bar or an editable document.
   process containment and checks that apps reach only their session bus. Lifecycle bursts
   lose no ownership events. No supported launch leaks children, sockets, windows or
   reservations.
-- Record VM measurements and outstanding board checks. RB5 is unavailable until further
-  notice; this checkpoint proceeds using the available Linux and VM evidence.
+- Record VM measurements and outstanding board checks. This checkpoint proceeds on Linux
+  and VM evidence; RB5 checks are follow-up work.
 
 ### C2b — interactive desktop workflows
 
@@ -556,7 +561,7 @@ per app: a game does not need to have a menu bar or an editable document.
   cancellation or destruction. Record kinetic scrolling separately from basic correctness.
 - Complete combined C2a/C2b regression checks on Linux/VM before the branch's single merge.
   Report popup clipping and unsupported-app cases explicitly. Board workflows, hand-tracking
-  tuning and performance measurements remain deferred until the RB5 becomes available.
+  tuning and performance measurements remain RB5 follow-up work.
 - Maintain a compatibility table for every surveyed app with separate C2a/C2b results:
   works / works with caveat / fails, scenario, environment and reason. Unrun board cases
   remain unverified. Do not claim OpenXR, hand tracking or rendering performance from
@@ -566,17 +571,17 @@ per app: a game does not need to have a menu bar or an editable document.
 
 | Risk | Response |
 |---|---|
-| GL clients fail on the board's shm-only path | Unverified until RB5 returns; record VM setup. |
+| GL clients fail on the board's shm-only path | Unverified on the RB5; record VM setup. |
 | No `dbus-daemon`, or apps need host services | Launch fails clearly; record affected apps. |
-| Missing board packages or different confinement | Check when RB5 returns; record gaps. |
+| Missing board packages or different confinement | No AppArmor on the board; apps not installed. |
 | Representative apps absent from the board image | GTK/Qt/SDL samples may need installing first. |
-| Stock Qualcomm image already runs Weston | Settle DRM coexistence or replacement at bring-up. |
+| Board display already owned | Lab RB5: Monado owns DP-1, no Weston; host apps headless. |
 | Large buffers or many surfaces cost too much CPU | Scaling saves no copying; measure early. |
 | Popup clipping hides menu items | Record as a usability caveat; overflow panels are deferred. |
 | One slot free for apps | Accept for C2; slot count is windowing's call. |
 | Pinches misclassified by hand-tracking jitter | Simulator tests now; board tuning deferred. |
-| No user manager when the launcher starts at boot | Tested over SSH only; check on the board. |
-| Pinch unproven on hand-only hardware | Shared with C1 (simulator only); verify on RB5. |
+| No user manager when the launcher starts at boot | Root's ends at logout; pick the launch user. |
+| Pinch unproven on hand-only hardware | Lab Monado built with no hand-tracking driver. |
 
 Software-renderer experiments include `GSK_RENDERER=cairo` or `LIBGL_ALWAYS_SOFTWARE=1`
 where supported by the installed toolkit. Record these per app; the VM's llvmpipe results
