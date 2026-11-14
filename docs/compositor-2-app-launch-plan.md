@@ -137,11 +137,13 @@ RB5 (Arch Linux ARM, systemd 262, cgroup v2) as an unprivileged user. Docker usu
 user systemd, so a skipped container run is not a pass.
 
 All runs used an interactive SSH login, which starts the user manager. The lab board starts
-the launcher as root from a script (`rb5-vr-demo`) run in a root SSH shell. Root has no
-lingering, so its user manager runs only while a root login is open; scoped apps would likely
-stop when that login ends, while the demo's detached processes survive. Settle the launch user
-before board workflows; lingering ([`loginctl enable-linger`][loginctl]) is a candidate fix,
-not yet validated.
+the launcher as root from a script (`rb5-vr-demo`) run in a root SSH shell, and root has no
+lingering. A logout test there on 2026-11-13 showed that the demo's detached processes keep the
+closed login's session, and with it root's user manager and scoped apps, alive. About 10 s after
+the last of them exits, the manager stops, ending scoped apps and unmounting `/run/user/0`. A
+launcher started at boot without a login would have no user manager (inferred, not tested).
+Settle the launch user before board workflows; lingering ([`loginctl enable-linger`][loginctl])
+is a candidate fix, not yet validated.
 
 **Seat ownership:** one `WaylandPointerRouter` owns arbitration for each session's seat;
 window views forward events carrying their `WindowId` to that shared router. C1 already
@@ -580,7 +582,7 @@ per app: a game does not need to have a menu bar or an editable document.
 | Popup clipping hides menu items | Record as a usability caveat; overflow panels are deferred. |
 | One slot free for apps | Accept for C2; slot count is windowing's call. |
 | Pinches misclassified by hand-tracking jitter | Simulator tests now; board tuning deferred. |
-| No user manager when the launcher starts at boot | Root's ends at logout; pick the launch user. |
+| No user manager when the launcher starts at boot | Needs a live root session; pick launch user. |
 | Pinch unproven on hand-only hardware | Lab Monado built with no hand-tracking driver. |
 
 Software-renderer experiments include `GSK_RENDERER=cairo` or `LIBGL_ALWAYS_SOFTWARE=1`
