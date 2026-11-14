@@ -22,11 +22,6 @@ func _ready():
 	input_line.text_submitted.connect(_on_submit)
 
 
-func _process(_delta):
-	if output_display.size.y < 10:
-		output_display.custom_minimum_size.y = 200
-
-
 ## Handles key input into the terminal
 func _input(input: InputEvent) -> void:
 	var key_input: InputEventKey = input as InputEventKey
