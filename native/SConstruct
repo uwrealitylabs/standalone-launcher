@@ -48,7 +48,7 @@ pkg_config = "PKG_CONFIG_PATH={} pkg-config".format(pkg_path)
 #
 # --static because a plain --libs names only wlroots itself and leaves
 # libwayland-server and the rest of the closure undefined.
-env.ParseConfig("{} --cflags --libs --static wlroots-0.20 wayland-server"
+env.ParseConfig("{} --cflags --libs --static wlroots-0.20 wayland-server xkbcommon"
 		.format(pkg_config))
 
 sources = Glob("src/*.cpp")

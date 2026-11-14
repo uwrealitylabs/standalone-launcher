@@ -1,18 +1,9 @@
 extends MeshInstance3D
 
-## Proof of concept: shows one Wayland client on a fixed quad.
-##
-## Owns the client process outright — creation, liveness, and teardown — while
-## [WaylandCompositor] owns polling and the texture. Splitting process ownership
-## across the GDScript/C++ boundary is how children get double-reaped or leaked.
-##
-## Deliberately not an [SWindow]: that class drives an [XRToolsViewport2DIn3D] and
-## [SubViewport], which a compositor-owned texture doesn't fit. Input, resizing,
-## focus and multi-window support are out of scope.
-##
-## Authored hidden, showing itself only once a real client frame is bound, so a
-## host with no GDExtension (every macOS and x86_64 machine) renders nothing rather
-## than an untextured white quad.
+## Shows one Wayland client on a fixed-size quad, hidden until a real frame binds, so
+## a host without the GDExtension shows nothing. It alone owns the client process, so
+## no child leaks or is reaped twice. A host [SWindow] sets the sizes before tree entry
+## and gates input via set_host_focused, set_keys_routed and set_pointer_enabled.
 
 ## Default client. Overridable via WRL_COMPOSITOR_CLIENT
 const DEFAULT_CLIENT_COMMAND := "weston-simple-shm"
@@ -28,16 +19,54 @@ const TERM_GRACE_SECONDS := 2.0
 ## Metres. The quad's height; width follows the surface aspect ratio.
 const QUAD_HEIGHT := 0.6
 
+## Group every screen joins, so the app can shut each one down before quitting.
+const GROUP := &"wayland_surfaces"
+
 ## Emitted once teardown is complete: the client is reaped and the server stopped.
 ## Fires exactly once per node, even when there was nothing to stop, so a caller
 ## can `await` it to sequence its own quit. See [method request_shutdown].
 signal shutdown_finished
+
+## Emitted once when the client goes away on its own: its toplevel is destroyed, or
+## its process exits with no surface mapped. Never emitted for a requested shutdown.
+signal client_ended
+
+## Raised by [HandPointer] on the quad's collider, which carries no signal of its
+## own; see [method _on_pointer_event].
+signal pointer_event(event: XRToolsPointerEvent)
+
+## Whether to bring the server and client up automatically on entering the tree.
+## Left on for the standalone scene; a host that starts the surface on its own
+## terms — or a test driving the node with its own compositor — turns it off, and
+## the node then stays hidden and idle until driven.
+@export var autostart: bool = true
+
+## Metres. When non-zero, the quad keeps this size instead of following the
+## surface's aspect, and a surface of another shape is stretched to fit it. Set
+## before the node enters the tree.
+var fixed_quad_size := Vector2.ZERO
+
+## Logical size the client is asked for in its first configure; zero lets the
+## client choose. Set before the node enters the tree.
+var initial_size := Vector2i.ZERO
 
 var _compositor: Node = null
 var _client_pid: int = -1
 var _terminating_since: float = -1.0
 var _material: StandardMaterial3D = null
 var _client_command: String = DEFAULT_CLIENT_COMMAND
+var _pointer_router := WaylandPointerRouter.new()
+
+## Whether the surface currently holds keyboard focus: mapped, focused by the host
+## and with keys routed. Gates key routing so keystrokes are never consumed -- and
+## never forwarded to a dead surface -- when there is no client to receive them.
+var _focused: bool = false
+## Whether the toplevel is shown as activated: mapped and focused by the host.
+var _activated: bool = false
+var _mapped: bool = false
+var _host_focused: bool = true
+var _keys_routed: bool = true
+var _pointer_enabled: bool = true
 
 ## Set once [method request_shutdown] is accepted. Distinguishes a requested
 ## teardown, which ends in [signal shutdown_finished], from a client that merely
@@ -47,6 +76,9 @@ var _shutdown_requested: bool = false
 ## Guards [method _finish_shutdown] so [signal shutdown_finished] fires only once.
 var _shutdown_finished_sent: bool = false
 
+## Guards [method _end_client] so [signal client_ended] fires only once.
+var _client_ended_sent: bool = false
+
 
 ## Brings up the server and the client, or leaves the node dormant and hidden.
 ## Every early return below is a supported outcome rather than an error path.
@@ -55,10 +87,19 @@ func _ready() -> void:
 	# no visible quad and no per-frame callback.
 	visible = false
 	set_process(false)
+	pointer_event.connect(_on_pointer_event)
+	add_to_group(GROUP)
+	if fixed_quad_size != Vector2.ZERO:
+		_set_quad_size(fixed_quad_size)
 
 	var override := OS.get_environment("WRL_COMPOSITOR_CLIENT")
 	if override != "":
 		_client_command = override
+
+	if not autostart:
+		# Something else owns bring-up: stay dormant, holding no compositor, until
+		# it injects one and drives the surface handlers directly.
+		return
 
 	if not ClassDB.class_exists("WaylandCompositor"):
 		# Expected off Linux arm64, the only target the extension builds for; not a
@@ -70,7 +111,10 @@ func _ready() -> void:
 	# Built only here: an unsupported host has nothing to shade.
 	_material = StandardMaterial3D.new()
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	# Rendered above 1:1 (see set_output_scale), so the sampler minifies: the mip
+	# chain and anisotropy keep the surface clean at distance and glancing angles.
+	_material.texture_filter = \
+			BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS_ANISOTROPIC
 	material_override = _material
 
 	_compositor = ClassDB.instantiate("WaylandCompositor")
@@ -85,6 +129,11 @@ func _ready() -> void:
 		push_error("Wayland server did not start.")
 		_discard_compositor()
 		return
+	# Advertise a 2x output so a HiDPI client renders at twice the resolution,
+	# keeping small text legible at distance. Set before the client connects.
+	_compositor.set_output_scale(2)
+	if initial_size != Vector2i.ZERO:
+		_compositor.set_initial_size(initial_size)
 	_launch_client()
 
 
@@ -98,10 +147,12 @@ func _process(_delta: float) -> void:
 		_escalate_if_term_expired()
 		return
 	_reap_client()
-	# Only a requested teardown ends in shutdown_finished; a client that exited
-	# on its own just leaves the node dormant.
+	# Only a requested teardown ends in shutdown_finished. A mapped surface may
+	# belong to a forked child that outlives the pid, so only an unmapped one ends.
 	if _shutdown_requested:
 		_finish_shutdown()
+	elif not _mapped:
+		_end_client()
 
 
 ## Drops a compositor that failed to start. Processing is stopped before the
@@ -148,6 +199,9 @@ func request_shutdown() -> void:
 	if _shutdown_requested:
 		return
 	_shutdown_requested = true
+	# Drop focus now rather than after the client exits, which can take the whole
+	# TERM grace: a closing surface must not keep taking keys.
+	_sync_focus()
 	if _client_pid == -1:
 		_finish_shutdown.call_deferred()
 		return
@@ -201,6 +255,22 @@ func _finish_shutdown() -> void:
 	shutdown_finished.emit()
 
 
+## Whether [method request_shutdown] has been accepted.
+func is_shutting_down() -> bool:
+	return _shutdown_requested
+
+
+## The client command, for naming the client to the user.
+func get_client_command() -> String:
+	return _client_command
+
+
+## Whether [signal shutdown_finished] has already fired, so a caller that arrives
+## late does not await it forever.
+func is_shut_down() -> bool:
+	return _shutdown_finished_sent
+
+
 ## Safety net for a teardown that bypassed [method request_shutdown] (the node
 ## freed directly). [method _exit_tree] gets no further [method _process] callbacks
 ## to drive a grace period, so the client is killed outright rather than waited on.
@@ -216,10 +286,59 @@ func _exit_tree() -> void:
 		_compositor = null
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED:
+		_update_collider()
+
+
+## Sets whether the host's window is focused. The toplevel shows as activated, and
+## takes keyboard focus while keys are routed, only when this and a mapped surface
+## agree. On by default, for the standalone screen.
+func set_host_focused(focused: bool) -> void:
+	_host_focused = focused
+	_sync_focus()
+
+
+## Sets whether keys reach the surface, without changing whether it shows as
+## activated. Cutting them takes keyboard focus away, so the client stops repeating
+## any key still held.
+func set_keys_routed(routed: bool) -> void:
+	_keys_routed = routed
+	_sync_focus()
+
+
+## Sets whether hands can point at the surface. Disabling it, like hiding the
+## quad, ends any press and takes the pointer off the surface.
+func set_pointer_enabled(enabled: bool) -> void:
+	_pointer_enabled = enabled
+	_update_collider()
+
+
+## Whether hand pointer events reach the surface.
+func accepts_pointer() -> bool:
+	return _pointer_enabled and is_inside_tree() and is_visible_in_tree()
+
+
+## Keeps the collider pointable only while the surface takes pointer input, so a
+## hidden or locked surface never swallows the ray meant for what sits behind it.
+func _update_collider() -> void:
+	var live := accepts_pointer()
+	var shape := get_node_or_null("StaticBody3D/CollisionShape3D") as CollisionShape3D
+	if shape:
+		shape.set_deferred("disabled", not live)
+	if not live:
+		# A pressed hand keeps its locked target, so it would otherwise go on
+		# dragging a surface it can no longer see.
+		_pointer_router.sink = _compositor
+		_pointer_router.cancel()
+
+
 func _on_surface_mapped(size: Vector2i) -> void:
 	# No texture exists yet — binding the material here would bind null.
 	print("[compositor_poc] surface mapped at %dx%d" % [size.x, size.y])
 	_apply_aspect(size)
+	_mapped = true
+	_sync_focus()
 
 
 func _on_surface_resized(size: Vector2i) -> void:
@@ -228,7 +347,12 @@ func _on_surface_resized(size: Vector2i) -> void:
 
 
 func _on_surface_unmapped() -> void:
+	# Reset before hiding: the bridge has already cleared pointer focus, so the
+	# hide must find nothing left to cancel.
+	_pointer_router.reset()
 	visible = false
+	_mapped = false
+	_sync_focus()
 
 
 func _on_frame_available() -> void:
@@ -240,8 +364,101 @@ func _on_frame_available() -> void:
 
 
 func _on_client_gone() -> void:
+	_pointer_router.reset()
 	visible = false
+	_mapped = false
+	_sync_focus()
 	print("[compositor_poc] client surface went away")
+	_end_client()
+
+
+## Reports a client that went away on its own; see [signal client_ended].
+func _end_client() -> void:
+	if _shutdown_requested or _client_ended_sent:
+		return
+	_client_ended_sent = true
+	client_ended.emit()
+
+
+# --- Pointer routing -------------------------------------------------------
+
+
+## Converts a hand's event on the collider to surface UV and routes it. Every
+## event while the surface takes pointer input feeds the router, mapped or not, so
+## ownership never drifts from the hands' real state; the compositor ignores input
+## until a surface maps.
+func _on_pointer_event(event: XRToolsPointerEvent) -> void:
+	# A hand locked on the collider keeps reporting after it is disabled.
+	if not accepts_pointer():
+		return
+	# Follow whichever compositor is current, including none after teardown.
+	_pointer_router.sink = _compositor
+	_pointer_router.handle(event.pointer, event.event_type, _world_to_uv(event.position))
+
+
+## Surface UV of a world point on the quad: (0, 0) top-left, (1, 1) bottom-right.
+## Not clamped, since a pressed drag reports points past the edge.
+func _world_to_uv(world: Vector3) -> Vector2:
+	var quad := mesh as QuadMesh
+	var local := global_transform.affine_inverse() * world
+	return Vector2(local.x / quad.size.x + 0.5, 0.5 - local.y / quad.size.y)
+
+
+# --- Keyboard routing ------------------------------------------------------
+# Keys come from a USB keyboard as unhandled input and from an attached virtual one.
+
+
+## Connects a virtual keyboard so its taps reach the focused surface. A host wires
+## the keyboard it wants routed here; the standalone POC has none of its own, and
+## the app's windowing keyboard is deliberately left to the windowing system.
+## Idempotent, so re-attaching the same keyboard connects it only once.
+func attach_virtual_keyboard(keyboard: XRToolsVirtualKeyboard2D) -> void:
+	if keyboard == null:
+		return
+	if not keyboard.key_pressed.is_connected(route_virtual_key):
+		keyboard.key_pressed.connect(route_virtual_key)
+
+
+## Routes real keyboard events to the surface. Only unhandled keys arrive here, so
+## a focused Godot UI still gets first refusal; forwarded keys are then consumed
+## so typing cannot also drive input actions such as the simulator's locomotion.
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not _focused or _compositor == null:
+		return
+	var key := event as InputEventKey
+	if key == null:
+		return
+	# Echo (auto-repeat) events are dropped at the boundary, so they can be
+	# forwarded as-is; the client generates its own repeats from repeat_info.
+	_compositor.send_physical_key(key)
+	get_viewport().set_input_as_handled()
+
+
+## Routes a virtual-keyboard tap to the surface while it holds keyboard focus. The
+## tap is a single pressed event; send_virtual_key synthesizes its release and
+## modifier chord at the boundary. Signal-delivered, so it never reaches the Input
+## singleton.
+func route_virtual_key(event: InputEventKey) -> void:
+	if not _focused or _compositor == null:
+		return
+	_compositor.send_virtual_key(event)
+
+
+## Syncs keyboard focus and the xdg_toplevel activated state with the mapped
+## state, a requested shutdown and the host's gates, sending only what changed.
+## Without a live surface both are cleared, which also stops key routing.
+func _sync_focus() -> void:
+	if _compositor == null:
+		return
+	var live := _mapped and not _shutdown_requested
+	var focused := live and _host_focused and _keys_routed
+	var activated := live and _host_focused
+	if focused != _focused:
+		_focused = focused
+		_compositor.set_keyboard_focus(focused)
+	if activated != _activated:
+		_activated = activated
+		_compositor.set_toplevel_activated(activated)
 
 
 ## Binds the compositor's current texture to the material. Returns whether a
@@ -257,11 +474,21 @@ func _bind_texture() -> bool:
 
 
 func _apply_aspect(size: Vector2i) -> void:
-	if size.x <= 0 or size.y <= 0:
+	if size.x <= 0 or size.y <= 0 or fixed_quad_size != Vector2.ZERO:
 		return
+	var aspect := float(size.x) / float(size.y)
+	_set_quad_size(Vector2(QUAD_HEIGHT * aspect, QUAD_HEIGHT))
+
+
+func _set_quad_size(size: Vector2) -> void:
 	# Local to the scene, so this never reaches another instance of the quad.
 	var quad := mesh as QuadMesh
 	if quad == null:
 		return
-	var aspect := float(size.x) / float(size.y)
-	quad.size = Vector2(QUAD_HEIGHT * aspect, QUAD_HEIGHT)
+	quad.size = size
+	# The collider tracks the quad; its box hangs behind so the front face lies on
+	# the quad's plane, where HandPointer resolves a press.
+	var shape := get_node_or_null("StaticBody3D/CollisionShape3D") as CollisionShape3D
+	if shape and shape.shape is BoxShape3D:
+		var box := shape.shape as BoxShape3D
+		box.size = Vector3(size.x, size.y, box.size.z)

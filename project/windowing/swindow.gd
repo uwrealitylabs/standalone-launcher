@@ -16,10 +16,27 @@ signal focused(win: SWindow)
 # means enter or exit based on the current presentation state.
 signal solo_requested(win: SWindow)
 
+const COMPOSITOR_SCREEN := preload("res://project/compositor/compositor_screen.tscn")
+# Shown in the Content viewport while a compositor window has no client frame.
+const WAITING_CONTENT := preload("res://project/windowing/window_placeholder_content.tscn")
+
 # The manager that owns this window's placement and size policy. Null for a
 # standalone window (e.g. a headless test fixture), which falls back to the
 # numeric clamp below.
 var manager: WindowManager = null
+
+# The compositor screen presenting this window's content in place of the Content
+# viewport, or null for an ordinary window. See host_compositor_surface.
+var _surface: MeshInstance3D = null
+# Holds the screen, so suspension can hide it without taking over the screen's own
+# visible flag, which stays hidden until a client frame arrives.
+var _surface_root: Node3D = null
+var _closing := false
+
+## Seconds a compositor window stays hidden waiting for its client's first frame
+## before it shows a waiting body, so a client that never draws can still be closed.
+## Read by [method host_compositor_surface].
+var first_frame_timeout := 2.0
 
 # True while this window is suspended behind a solo presentation (a sibling of the
 # soloed window): surfaces hidden, all collision and key routing off.
@@ -159,7 +176,115 @@ func _resolve_pointer_hit(event: XRToolsPointerEvent, plane: Plane) -> Variant:
 
 ## Send input event to this window
 func send_input(event: InputEvent):
+	if _surface:
+		_surface.route_virtual_key(event)
+		return
 	content_3d._input(event)
+
+
+## Shows a Wayland client in place of the Content viewport, fixed at the current size
+## (no resize handles). The window stays hidden until the client's first frame or
+## [member first_frame_timeout], shows a waiting body while no frame is up, and closes
+## when the client ends. Off-headset it takes keys only through [method send_input].
+## Call once, before first focus. `screen` is an out-of-tree compositor_screen.tscn;
+## null makes one, whose server and client start on entering the tree.
+func host_compositor_surface(screen: MeshInstance3D = null) -> void:
+	if _surface:
+		return
+	_surface = screen if screen else COMPOSITOR_SCREEN.instantiate()
+	# Content now only shows the waiting body; it never takes keys again.
+	set_content(WAITING_CONTENT)
+	content_3d.visible = false
+	content_3d.input_keyboard = false
+	content_3d.input_gamepad = false
+	_remove_resize_handles()
+
+	_surface.fixed_quad_size = content_size
+	# The client lays out at the window's own pixel density, so a compositor
+	# window reads like a viewport one of the same size.
+	_surface.initial_size = Vector2i((content_size * PIXELS_PER_UNIT).round())
+	# Gated shut until the manager focuses the window.
+	_surface.set_host_focused(false)
+	_surface.set_keys_routed(false)
+	_surface.set_pointer_enabled(not _interaction_locked)
+	_surface.pointer_event.connect(_on_pointer_event)
+	# Deferred, so the close never runs inside the compositor's event dispatch.
+	_surface.client_ended.connect(close, CONNECT_DEFERRED)
+	# Header included, so it never shows ahead of the content.
+	visible = false
+	_surface.visibility_changed.connect(_on_surface_visibility_changed)
+	var reveal_timer := Timer.new()
+	reveal_timer.one_shot = true
+	reveal_timer.autostart = true
+	reveal_timer.wait_time = first_frame_timeout
+	reveal_timer.timeout.connect(_reveal)
+	reveal_timer.timeout.connect(reveal_timer.queue_free)
+	add_child(reveal_timer)
+	_surface_root = Node3D.new()
+	_surface_root.name = "Surface"
+	_surface_root.transform = content_3d.transform
+	_surface_root.visible = not is_suspended
+	add_child(_surface_root)
+	_surface_root.add_child(_surface)
+	if not XRUtils.is_openxr_active():
+		# As for Content: keys come only via send_input. READY enables processing
+		# for an overridden callback, so switch it off after that.
+		if _surface.is_node_ready():
+			_surface.set_process_unhandled_key_input(false)
+		else:
+			_surface.ready.connect(
+					_surface.set_process_unhandled_key_input.bind(false), CONNECT_ONE_SHOT)
+
+
+func _on_surface_visibility_changed() -> void:
+	# A shutdown that skipped close(), such as the app quitting, ends here instead.
+	if _surface.is_shutting_down():
+		visible = false
+		set_interaction_locked(true)
+		return
+	# The screen's own flag turns on only once a client frame is bound.
+	if _surface.visible:
+		_reveal()
+	else:
+		_sync_waiting_body()
+
+
+## Shows a compositor window held hidden by [method host_compositor_surface].
+func _reveal() -> void:
+	if not _closing and not _surface.is_shutting_down():
+		visible = true
+		_sync_waiting_body()
+
+
+## Shows the waiting body in place of a compositor surface that has no frame to
+## show. Both sit on one plane, so exactly one of them is ever visible.
+func _sync_waiting_body() -> void:
+	var waiting := not is_suspended and not _surface.visible
+	# Named on every sync: the screen reads its client override only in _ready.
+	if waiting:
+		var body := content_3d.get_scene_instance()
+		var label := body.get_node_or_null("Label") as Label if body else null
+		if label:
+			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			label.text = "Waiting for %s" % _surface.get_client_command().get_file()
+	content_3d.visible = waiting
+
+
+## Whether this window keeps a fixed size, ignoring resize requests.
+func has_fixed_size() -> bool:
+	return _surface != null
+
+
+func _remove_resize_handles() -> void:
+	_clear_hover_affordances()
+	for part in ["ResizeHandles", "ResizeAffordances"]:
+		var node := get_node_or_null(part)
+		if node:
+			remove_child(node)
+			node.queue_free()
+	_resize_handles.clear()
+	_resize_affordances.clear()
+	_affordance_hovers.clear()
 
 
 ## Sets the window's content to the given UI scene
@@ -178,8 +303,11 @@ func focus() -> void:
 ## a transition lock can cut input without reporting a focus loss that never
 ## happened.
 func _set_key_routing(enabled: bool) -> void:
-	content_3d.input_keyboard = enabled
-	content_3d.input_gamepad = enabled
+	if _surface:
+		_surface.set_keys_routed(enabled)
+	else:
+		content_3d.input_keyboard = enabled
+		content_3d.input_gamepad = enabled
 	# Gate the header's keys too, or every title bar keeps taking physical keys
 	# regardless of focus. Its gamepad flag is left as authored (off).
 	header_3d.input_keyboard = enabled
@@ -188,6 +316,9 @@ func _set_key_routing(enabled: bool) -> void:
 ## Tells the content scene, if it defines on_window_focus_changed(bool), that
 ## focus moved. Notification concern only: it routes no input.
 func _notify_content_focus(enabled: bool) -> void:
+	if _surface:
+		_surface.set_host_focused(enabled)
+		return
 	# content_3d reports null until the scene is set on first focus; nothing to
 	# notify before then.
 	var scene := content_3d.get_scene_instance()
@@ -241,15 +372,18 @@ func set_suspended(suspended: bool) -> void:
 	if is_suspended == suspended:
 		return
 	is_suspended = suspended
+	if _surface_root:
+		# Hiding the screen also disables its collider and ends any press on it.
+		_surface_root.visible = not suspended
+		_sync_waiting_body()
+	else:
+		content_3d.visible = not suspended
+	header_3d.visible = not suspended
 	if suspended:
-		content_3d.visible = false
-		header_3d.visible = false
 		_set_handles_disabled(true)
 		_clear_hover_affordances()
 		_set_key_routing(false)
 	else:
-		content_3d.visible = true
-		header_3d.visible = true
 		_set_handles_disabled(false)
 	_notify_content_suspended(suspended)
 
@@ -266,6 +400,8 @@ func set_interaction_locked(locked: bool) -> void:
 	_interaction_locked = locked
 	content_3d.enabled = not locked
 	header_3d.enabled = not locked
+	if _surface:
+		_surface.set_pointer_enabled(not locked)
 	_set_handles_disabled(locked)  # disabled == locked
 	if locked:
 		_clear_hover_affordances()
@@ -451,7 +587,13 @@ func _presentation_size() -> Vector2:
 ## and programmatic paths reach it, but it is not the public entry. `live` omits
 ## the render resolutions, as in [method _apply_presented_geometry].
 func _commit_requested_size(desired: Vector2, live: bool = false) -> void:
-	if manager and manager.soloed_window == self:
+	if has_fixed_size():
+		# The client was configured for content_size and never renegotiates, so
+		# every presentation keeps it.
+		if manager and manager.soloed_window == self:
+			current_solo_size = content_size
+		_apply_presented_geometry(content_size, live)
+	elif manager and manager.soloed_window == self:
 		# Solo path: clamp to solo safety limits and write the live solo size only.
 		current_solo_size = manager.clamp_solo_size(self, desired)
 		_apply_presented_geometry(current_solo_size, live)
@@ -593,6 +735,8 @@ func _build_resize_handles() -> void:
 
 ## Sizes and positions the handles to straddle the current content edges.
 func _layout_resize_handles() -> void:
+	if _resize_handles.is_empty():
+		return
 	var hw := _active_size.x / 2.0
 	var hh := _active_size.y / 2.0
 	var tx := minf(HANDLE_MAX_THICKNESS, _active_size.x * HANDLE_THICKNESS_RATIO)
@@ -729,10 +873,18 @@ func _set_handle_hovered(handle_id: String, pointer: Node3D, hovered: bool) -> v
 		group.visible = not hovers.is_empty()
 
 
-## Closes the window: emits closed and frees the node.
+## Closes the window: emits closed and frees the node. A compositor window first
+## hides and waits for its client and server to stop.
 func close() -> void:
+	if _closing:
+		return
+	_closing = true
 	# Cancel any in-flight resize so a missed RELEASED can't leave stale state
 	_resizing = false
 	_update_processing()
 	closed.emit()
+	if _surface and not _surface.is_shut_down():
+		visible = false
+		_surface.request_shutdown()
+		await _surface.shutdown_finished
 	queue_free()

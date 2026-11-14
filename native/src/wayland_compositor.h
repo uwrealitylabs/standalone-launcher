@@ -3,10 +3,12 @@
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float64_array.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
 extern "C" {
@@ -49,6 +51,26 @@ public:
 	Ref<ImageTexture> get_texture() const;
 	Dictionary get_stats() const;
 
+	/* Input in Godot terms: surface UV (0..1, beyond it during a grab), MouseButton
+	 * and InputEventKey. All are no-ops until a surface maps. */
+	void pointer_enter(const Vector2 &uv);
+	void pointer_motion(const Vector2 &uv);
+	void pointer_leave();
+	void send_button(int button, bool pressed);
+
+	/* A real key, translated 1:1 with its location. Echoes are dropped: the
+	 * client makes its own repeats. */
+	void send_physical_key(const Ref<InputEventKey> &event);
+
+	/* A virtual-keyboard tap (one pressed event with modifier flags), expanded to
+	 * modifiers down, key press + release, modifiers up. */
+	void send_virtual_key(const Ref<InputEventKey> &event);
+
+	void set_keyboard_focus(bool focused);
+	void set_toplevel_activated(bool activated);
+	void set_initial_size(const Vector2i &size);
+	void set_output_scale(int scale);
+
 protected:
 	static void _bind_methods();
 
@@ -84,6 +106,8 @@ private:
 	Vector2i last_mapped_size;
 	int64_t frames_copied = 0;
 	int64_t frames_rejected = 0;
+	// Godot frames seen while running: the denominator for slow_frames.
+	int64_t frames_processed = 0;
 	int64_t slow_frames = 0;
 	double slow_frame_budget = 1.0 / 72.0;
 };
